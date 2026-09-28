@@ -112,6 +112,15 @@ from Higgsfield.
 Each video card also has **⋯ → View raw data**: the exact request sent to Higgsfield, its raw answer,
 and every status change. Useful if you contact Higgsfield support.
 
+## 7. Credits and cost
+
+- **Before you generate:** the bottom of the Create form shows **≈ X credits ($Y)**, Higgsfield's own
+  price estimate for the chosen model and settings. For edits and extends it appears once the files have
+  been sent to Higgsfield at least once. Otherwise it says "price n/a".
+- **Remaining balance:** Higgsfield's API **doesn't let apps read your balance**, so the sidebar shows
+  **credits spent through this app** (estimated, finished videos only; failed ones are free) and a
+  **Check balance / top up** link to the Higgsfield Console, where the exact balance lives.
+
 ## Good to know
 
 - **Your videos are kept.** Higgsfield deletes outputs after about 7 days, so the app downloads every finished

@@ -128,7 +128,7 @@ export function ProjectPage() {
         }
       />
 
-      <Tabs value={tab} onValueChange={setTab} className="mx-auto max-w-7xl gap-6 px-4 py-6 sm:px-6">
+      <Tabs value={tab} onValueChange={setTab} className="mx-auto max-w-7xl gap-4 px-4 py-4 sm:px-6">
         <TabsList>
           <Tip label="Make a new video: from text, an image, references, or by editing/extending one you made">
             <TabsTrigger value="create"><Sparkles /> Create</TabsTrigger>
@@ -143,11 +143,11 @@ export function ProjectPage() {
           </Tip>
         </TabsList>
 
-        <TabsContent value="create" className="grid gap-6 lg:grid-cols-[minmax(0,480px)_1fr]">
+        <TabsContent value="create" className="grid items-start gap-5 lg:grid-cols-[minmax(0,440px)_1fr]">
           <CreatePanel projectId={projectId} onCreated={upsert} />
-          <section className="grid content-start gap-4">
+          <section className="grid content-start gap-3 lg:sticky lg:top-4">
             <div className="flex items-baseline justify-between">
-              <h2 className="font-semibold tracking-tight">Recent</h2>
+              <h2 className="text-sm font-medium text-muted-foreground">Recent</h2>
               {gens && gens.length > 4 && (
                 <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setTab('videos')}>
                   View all {gens.length} →

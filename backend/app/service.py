@@ -12,6 +12,7 @@ Local job statuses:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -290,6 +291,10 @@ async def create_generation(workspace_id: str, project_id: str, body: CreateGene
         poll_deadline=now + settings.generation_timeout_seconds,
     )
     log.info("submitted %s request_id=%s model=%s", generation_id, submission.request_id, model.id)
+    # Record the price for "spent via this app" in the background: free, and never delays the job.
+    task = asyncio.get_running_loop().create_task(_record_cost(generation_id, api_key, model.id, arguments))
+    _bg.add(task)
+    task.add_done_callback(_bg.discard)
     return get_owned(workspace_id, generation_id), True
 
 
@@ -420,6 +425,53 @@ def recover_orphaned_submissions() -> int:
         return cur.rowcount
 
 
+_estimate_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_bg: set[asyncio.Task] = set()
+
+
+async def _record_cost(generation_id: str, api_key: str, model_id: str, arguments: dict[str, Any]) -> None:
+    est = await higgsfield.gateway.estimate(api_key, model_id, arguments)
+    if est:
+        _update(generation_id, est_credits=est["credits"], est_usd=est["usd"])
+
+
+async def estimate_for_ui(workspace_id: str, body: CreateGeneration) -> dict[str, Any]:
+    """Cost preview for the Create form. Only uses media URLs we already have (no uploads)."""
+    model = catalog.BY_ID.get(body.model)
+    if not model:
+        return {"available": False, "reason": "Unknown model."}
+    media_ids = {k: v for k, v in body.media.items() if v}
+    try:
+        prompt, params = catalog.validate(model, body.prompt or ("x" if model.prompt_required else None), body.params, media_ids)
+    except catalog.SpecError as err:
+        return {"available": False, "reason": str(err)}
+    api_key = get_api_key(workspace_id)
+    if not api_key:
+        return {"available": False, "reason": "Add your API key to see prices."}
+    arguments: dict[str, Any] = dict(params)
+    if prompt:
+        arguments["prompt"] = prompt
+    for slot in model.media:
+        urls = []
+        for aid in media_ids.get(slot.name, []):
+            a = db.fetch_one("SELECT remote_url FROM assets WHERE id = ? AND workspace_id = ?", (aid, workspace_id))
+            if not a or not a["remote_url"]:
+                return {"available": False, "reason": "Price shown after your files are first sent to Higgsfield."}
+            urls.append(a["remote_url"])
+        if urls:
+            arguments[slot.name] = urls if slot.multiple else urls[0]
+    key = hashlib.sha256(json.dumps([workspace_id, model.id, {k: v for k, v in arguments.items() if k != "prompt"}],
+                                    sort_keys=True).encode()).hexdigest()
+    hit = _estimate_cache.get(key)
+    if hit and db.now() - hit[0] < 300:
+        return hit[1]
+    est = await higgsfield.gateway.estimate(api_key, model.id, arguments)
+    result = {"available": True, **est} if est else {"available": False, "reason": "Higgsfield didn't return a price for this request."}
+    if est:
+        _estimate_cache[key] = (db.now(), result)
+    return result
+
+
 def stats(workspace_id: str) -> dict[str, Any]:
     settings = get_settings()
     data_dir = settings.database_path.parent
@@ -432,6 +484,10 @@ def stats(workspace_id: str) -> dict[str, Any]:
         "SELECT COUNT(*) AS files, COALESCE(SUM(size_bytes), 0) AS bytes FROM assets "
         "WHERE workspace_id = ? AND local_path IS NOT NULL", (workspace_id,)) or {}
     projects_n = db.fetch_one("SELECT COUNT(*) AS n FROM projects WHERE workspace_id = ?", (workspace_id,)) or {}
+    spent = db.fetch_one(
+        "SELECT COALESCE(SUM(est_credits), 0) AS credits, COALESCE(SUM(est_usd), 0) AS usd, "
+        "SUM(CASE WHEN est_credits IS NULL THEN 1 ELSE 0 END) AS unknown "
+        "FROM generations WHERE workspace_id = ? AND status = 'completed'", (workspace_id,)) or {}
     ledger_file = data_dir / "ledger.jsonl"
     backups = sorted((data_dir / "backups").glob("app-*.db")) if (data_dir / "backups").exists() else []
     return {
@@ -444,4 +500,7 @@ def stats(workspace_id: str) -> dict[str, Any]:
         "data_dir": str(data_dir.resolve()),
         "ledger": {"file": ledger_file.name, "bytes": ledger_file.stat().st_size if ledger_file.exists() else 0},
         "last_backup": backups[-1].name if backups else None,
+        # Estimated from Higgsfield's per-request price at submit time; failed jobs cost nothing.
+        "spent": {"credits": round(spent.get("credits") or 0, 3), "usd": round(spent.get("usd") or 0, 4),
+                  "unpriced_videos": spent.get("unknown") or 0},
     }

@@ -112,3 +112,41 @@ def test_compact_ledger_keeps_rebuildability(client, fake):
     assert list((get_settings().database_path.parent / "backups").glob("ledger-*.jsonl"))
     lines = list(ledger.read(ledger.path_for(get_settings().database_path)))
     assert any(l["table"] == "projects" and l["row"]["name"] == "Compact me 2" for l in lines)
+
+
+def test_estimate_preview_and_spend_tracking(client, fake):
+    import asyncio
+
+    save_key(client)
+    pid = new_project(client)
+    body = {"model": "bytedance/seedance-2.0/text-to-video", "prompt": "x", "params": {"duration": 8}}
+    r = client.post("/api/estimate", json=body).json()
+    assert r == {"available": True, "credits": 2.5, "usd": 0.16}
+    assert fake.estimates[-1] == ("bytedance/seedance-2.0/text-to-video",
+                                  {"duration": 8, "resolution": "720p", "aspect_ratio": "16:9", "generate_audio": True, "prompt": "x"})
+    # Cached: same settings (prompt changes don't matter) -> no extra call.
+    client.post("/api/estimate", json={**body, "prompt": "other"})
+    assert len(fake.estimates) == 1
+    # Unavailable price never breaks anything.
+    fake.estimate_value = None
+    assert client.post("/api/estimate", json={**body, "params": {"duration": 9}}).json()["available"] is False
+    fake.estimate_value = {"credits": 4.0, "usd": 0.25}
+    done = complete(client, generate(client, pid).json()["id"])
+    client.portal.call(asyncio.sleep, 0.05)
+    s = client.get("/api/stats").json()["spent"]
+    assert s["credits"] == 4.0 and s["usd"] == 0.25 and s["unpriced_videos"] == 0
+    assert done["status"] == "completed"
+
+
+def test_estimate_skips_media_not_yet_uploaded(client, fake):
+    save_key(client)
+    pid = new_project(client)
+    img = upload(client, pid, PNG, "x.png").json()["id"]
+    r = client.post("/api/estimate", json={"model": "bytedance/seedance-2.0/image-to-video",
+                                           "media": {"image_url": [img]}}).json()
+    assert r["available"] is False and fake.estimates == [] and fake.uploads == []
+
+
+def test_estimate_without_key(client):
+    r = client.post("/api/estimate", json={"model": "bytedance/seedance-2.0/text-to-video", "prompt": "x"}).json()
+    assert r["available"] is False and "API key" in r["reason"]

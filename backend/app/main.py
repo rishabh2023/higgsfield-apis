@@ -44,7 +44,7 @@ Mutation = Depends(require_app_header)
 
 
 # Bumped whenever the API contract changes; the UI compares it to spot a stale server.
-API_VERSION = 4
+API_VERSION = 5
 
 
 @app.get("/api/health")
@@ -71,6 +71,11 @@ class DeleteFiles(BaseModel):
 
 class ClearScope(BaseModel):
     scope: Literal["failed", "unused_uploads", "everything"]
+
+
+@app.post("/api/estimate")
+async def estimate(body: CreateGeneration, workspace_id: str = Depends(current_workspace)):
+    return await service.estimate_for_ui(workspace_id, body)
 
 
 @app.get("/api/storage")

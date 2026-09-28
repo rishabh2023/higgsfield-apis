@@ -29,6 +29,9 @@ def test_ledger_records_every_change_but_not_poll_noise(client, fake):
     save_key(client)
     pid = new_project(client)
     gid = generate(client, pid).json()["id"]
+    import asyncio
+
+    client.portal.call(asyncio.sleep, 0.05)  # let the background cost record land (a real, logged change)
     before = len(ledger_lines())
     # A poll that leaves status unchanged only updates bookkeeping -> nothing logged.
     fake.statuses[fake_rid(fake)] = ["queued"]

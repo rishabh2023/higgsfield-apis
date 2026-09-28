@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Film, FolderOpen, KeyRound, Settings } from 'lucide-react'
-import { Link, NavLink, Outlet } from 'react-router'
+import { AlertTriangle, Coins, ExternalLink, Film, FolderOpen, Info, KeyRound, Settings } from 'lucide-react'
+import { Link, NavLink, Outlet, useLocation } from 'react-router'
 
 import { Tip } from '@/components/hint'
-import { ApiError, api, EXPECTED_API_VERSION } from '@/lib/api'
+import { ApiError, api, EXPECTED_API_VERSION, type Stats } from '@/lib/api'
 import { canGenerate, useApp } from '@/lib/app-context'
 import { cn } from '@/lib/utils'
 
@@ -54,26 +54,25 @@ export function AppShell() {
             </NavLink>
           ))}
         </nav>
-        <div className="mt-auto hidden p-3 md:block">
+        <div className="mt-auto hidden gap-2 p-3 md:grid">
+          {ready && <CreditsWidget />}
           {credential && (
             <Tip side="right" label={ready ? 'Your Higgsfield key is saved and working. Click to manage it.' : 'Generating needs your Higgsfield API key. Click to add it.'}>
-            <Link
-              to="/settings"
-              className={cn(
-                'flex items-center gap-2 rounded-md border px-2.5 py-2 text-xs transition-colors hover:bg-accent',
-                ready ? 'text-muted-foreground' : 'border-amber-500/40 text-amber-300',
-              )}
-            >
-              <KeyRound className="size-3.5" />
-              {ready ? (
-                <span>
-                  API key <span className="font-mono">{credential.key_hint}</span>
-                </span>
-              ) : (
-                <span>Add your Higgsfield API key</span>
-              )}
-              <span className={cn('ml-auto size-2 rounded-full', ready ? 'bg-emerald-400' : 'bg-amber-400')} />
-            </Link>
+              <Link
+                to="/settings"
+                className={cn(
+                  'flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs transition-colors hover:bg-accent',
+                  ready ? 'text-muted-foreground' : 'border-amber-500/40 text-amber-300',
+                )}
+              >
+                <KeyRound className="size-3.5" />
+                {ready ? (
+                  <span>API key <span className="font-mono">{credential.key_hint}</span></span>
+                ) : (
+                  <span>Add your Higgsfield API key</span>
+                )}
+                <span className={cn('ml-auto size-2 rounded-full', ready ? 'bg-emerald-400' : 'bg-amber-400')} />
+              </Link>
             </Tip>
           )}
         </div>
@@ -103,14 +102,42 @@ export function PageHeader({ title, description, actions, back }: {
 }) {
   return (
     <div className="border-b">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-4 px-4 py-5 sm:px-6">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-3 px-4 py-3.5 sm:px-6">
         <div className="min-w-0">
           {back}
-          <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
-          {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
+          <h1 className="truncate text-lg font-semibold tracking-tight">{title}</h1>
+          {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
         </div>
         {actions && <div className="flex items-center gap-2">{actions}</div>}
       </div>
+    </div>
+  )
+}
+
+/** Higgsfield has no API for the remaining balance, so we show what this app has spent
+ *  (from Higgsfield's per-request price estimates) and link to the real balance. */
+function CreditsWidget() {
+  const location = useLocation()
+  const [spent, setSpent] = useState<Stats['spent'] | null>(null)
+  useEffect(() => {
+    api.stats().then((s) => setSpent(s.spent ?? null)).catch(() => undefined)
+  }, [location.pathname])
+  return (
+    <div className="grid gap-1.5 rounded-md border bg-background/40 p-2.5 text-xs">
+      <div className="flex items-center gap-1.5 text-muted-foreground">
+        <Coins className="size-3.5 text-amber-300" /> Credits
+        <Tip side="right" label="Higgsfield doesn’t let apps read your remaining balance, so this shows the estimated credits spent on finished videos made here. Failed videos cost nothing. Your exact balance is in the Higgsfield Console.">
+          <Info className="ml-auto size-3.5 cursor-help" />
+        </Tip>
+      </div>
+      <p>
+        <span className="text-sm font-semibold tabular-nums">{spent ? spent.credits.toLocaleString() : '—'}</span>
+        <span className="text-muted-foreground"> spent here{spent && spent.usd > 0 ? ` (~$${spent.usd.toFixed(2)})` : ''}</span>
+      </p>
+      <a href="https://console.higgsfield.ai" target="_blank" rel="noreferrer"
+        className="flex items-center gap-1 text-violet-300 hover:text-violet-200">
+        Check balance / top up <ExternalLink className="size-3" />
+      </a>
     </div>
   )
 }

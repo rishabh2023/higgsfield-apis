@@ -119,7 +119,10 @@ export type Stats = {
   data_dir: string
   ledger: { file: string; bytes: number }
   last_backup: string | null
+  spent: { credits: number; usd: number; unpriced_videos: number }
 }
+
+export type Estimate = { available: true; credits: number; usd: number } | { available: false; reason: string }
 
 export type StoredFile = Asset & {
   project_name: string
@@ -154,7 +157,7 @@ export type RawGeneration = {
 }
 
 /** Must match API_VERSION in backend/app/main.py. */
-export const EXPECTED_API_VERSION = 4
+export const EXPECTED_API_VERSION = 5
 
 export class ApiError extends Error {
   status: number
@@ -220,6 +223,7 @@ export const api = {
   retryDownload: (id: string) => request<Asset>(`/assets/${id}/retry-download`, { method: 'POST' }),
 
   stats: () => request<Stats>('/stats'),
+  estimate: (body: CreateGenerationBody) => request<Estimate>('/estimate', json('POST', body)),
   version: () => request<{ api_version: number }>('/version'),
   storage: () => request<StorageList>('/storage'),
   deleteFiles: (asset_ids: string[]) => request<{ deleted: number }>('/storage/delete', json('POST', { asset_ids })),

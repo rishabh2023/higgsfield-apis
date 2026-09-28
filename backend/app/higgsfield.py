@@ -173,6 +173,23 @@ class HiggsfieldGateway:
         except Exception as exc:  # noqa: BLE001
             raise _classify(exc, submitting=False) from exc
 
+    async def estimate(self, api_key: str, model: str, arguments: dict[str, Any]) -> dict[str, float] | None:
+        """Documented cost estimate (docs: concepts/billing-and-retention): POST /estimate/{model}
+        with the same body as the generation -> {"credits": "1.500", "usd": "0.094"}.
+        The SDK has no helper for it, so this is direct REST. Returns None if unavailable;
+        callers must never block generation on it."""
+        try:
+            async with httpx.AsyncClient(timeout=10, headers={
+                "Authorization": f"Key {api_key}", "User-Agent": APP_USER_AGENT, "Content-Type": "application/json",
+            }) as c:
+                r = await c.post(f"https://api.higgsfield.ai/estimate/{model}", json=arguments)
+            if r.status_code != 200:
+                return None
+            body = r.json()
+            return {"credits": float(body["credits"]), "usd": float(body["usd"])}
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            return None
+
     async def verify_credentials(self, api_key: str) -> bool | None:
         """Cheap, non-billable check: look up a random request ID.
 

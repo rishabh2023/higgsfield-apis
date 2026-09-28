@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ExternalLink, FastForward, Film, ImageIcon, Images, Info, Loader2, Mic, Plus, Sparkles, Square, Type, Wand2, X } from 'lucide-react'
+import { ChevronRight, Coins, ExternalLink, FastForward, Film, ImageIcon, Images, Info, Lightbulb, Loader2, Mic, Plus, Sparkles, Square, Type, Wand2, X } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 
@@ -8,16 +8,16 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Hint, Tip } from '@/components/hint'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
-import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import {
-  ApiError, api, newIdempotencyKey, type Asset, type AssetBrief, type Generation, type MediaSlot, type ModeId,
+  ApiError, api, newIdempotencyKey, type Asset, type AssetBrief, type Estimate, type Generation, type MediaSlot, type ModeId,
   type ModelSpec,
 } from '@/lib/api'
 import { canGenerate, useApp } from '@/lib/app-context'
@@ -211,6 +211,26 @@ export function CreatePanel({ projectId, onCreated }: { projectId: string; onCre
     if (initialized && modelId) saveDraft(projectId, { mode, modelId, prompt, params, media, idemKey: idemKey.current })
   }, [initialized, projectId, mode, modelId, prompt, params, media])
 
+  // Live price preview (debounced). Prompt text doesn't change the price, so it isn't a dependency.
+  const [estimate, setEstimate] = useState<Estimate | null>(null)
+  const [estimating, setEstimating] = useState(false)
+  const mediaKey = JSON.stringify(Object.fromEntries(Object.entries(media).map(([k, v]) => [k, v.map((a) => a.id)])))
+  const hasPrompt = prompt.trim().length > 0
+  useEffect(() => {
+    if (!model || !canGenerate(credential)) {
+      setEstimate(null)
+      return
+    }
+    setEstimating(true)
+    const t = setTimeout(() => {
+      api.estimate({ model: model.id, prompt: hasPrompt ? 'x' : null, params, media: JSON.parse(mediaKey) })
+        .then(setEstimate)
+        .catch(() => setEstimate(null))
+        .finally(() => setEstimating(false))
+    }, 600)
+    return () => clearTimeout(t)
+  }, [model, params, mediaKey, hasPrompt, credential])
+
   if (!catalog || !model) {
     return <Card className="h-96 animate-pulse" />
   }
@@ -271,128 +291,144 @@ export function CreatePanel({ projectId, onCreated }: { projectId: string; onCre
     params.resolution as string | undefined,
     params.aspect_ratio as string | undefined,
   ].filter(Boolean).join(' · ')
+  const requiredSlots = model.media.filter((s) => s.required)
+  const optionalSlots = model.media.filter((s) => !s.required)
+  const optionalCount = optionalSlots.reduce((n, s) => n + (media[s.name]?.length ?? 0), 0)
 
   function addChip(text: string) {
     setPrompt((p) => (p.trim() ? `${p.trim().replace(/[.,]$/, '')}, ${text}` : text.charAt(0).toUpperCase() + text.slice(1)))
   }
+  const slotField = (slot: MediaSlot) => (
+    <SlotField key={slot.name} slot={slot} items={media[slot.name] ?? []}
+      onPick={() => setPicking(slot)}
+      onRemove={(id) => setMedia((p) => ({ ...p, [slot.name]: (p[slot.name] ?? []).filter((a) => a.id !== id) }))} />
+  )
 
   return (
-    <form onSubmit={submit} className="grid gap-4"
+    <form onSubmit={submit} className="grid gap-3"
       onKeyDown={(e) => {
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
           e.preventDefault()
           send(false)
         }
       }}>
-      {/* Mode picker */}
-      <div className="grid grid-cols-5 gap-1.5 rounded-xl border bg-muted/20 p-1.5">
-        {catalog.modes.map((m) => {
-          const { label, icon: Icon } = MODE_TAB[m.id]
-          const active = m.id === mode
-          return (
-            <Tip key={m.id} side="bottom" label={<><b>{m.name}</b>: {MODE_HELP[m.id].how}</>}>
-              <button type="button" onClick={() => selectMode(m.id)} aria-pressed={active}
-                className={cn(
-                  'flex flex-col items-center gap-1 rounded-lg px-1 py-2.5 text-xs font-medium transition',
-                  active ? 'bg-background text-foreground shadow-sm ring-1 ring-border' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-                )}>
-                <Icon className={cn('size-4', active && 'text-violet-300')} />
-                {label}
-              </button>
-            </Tip>
-          )
-        })}
-      </div>
-
       <Card className="gap-0 overflow-hidden py-0">
-        {/* How it works */}
-        <div className="border-b bg-gradient-to-br from-violet-500/10 via-transparent to-sky-500/5 px-5 py-4">
-          <p className="text-base font-semibold">{catalog.modes.find((m) => m.id === mode)?.name}
-            <span className="ml-2 text-sm font-normal text-muted-foreground">{modeHelp.tagline}</span>
-          </p>
-          <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{modeHelp.how}</p>
-          {mode === 'extend' && (
-            <div className="mt-3 flex items-center gap-1.5 text-[11px] font-medium">
-              <span className="rounded-md border bg-background/60 px-2 py-1">Your clip</span>
-              <span className="text-muted-foreground">→</span>
-              <span className="rounded-md border border-violet-400/40 bg-violet-500/10 px-2 py-1 text-violet-200">
-                + {durationParam ?? 5}s new footage
-              </span>
-            </div>
-          )}
-          <p className="mt-2 text-xs text-muted-foreground/80"><span className="text-muted-foreground">Best for:</span> {modeHelp.bestFor}</p>
+        {/* Mode switcher */}
+        <div className="flex gap-0.5 border-b bg-muted/20 p-1">
+          {catalog.modes.map((m) => {
+            const { label, icon: Icon } = MODE_TAB[m.id]
+            const active = m.id === mode
+            return (
+              <Tip key={m.id} side="bottom" label={<><b>{m.name}</b>: {MODE_HELP[m.id].how}</>}>
+                <button type="button" onClick={() => selectMode(m.id)} aria-pressed={active}
+                  className={cn(
+                    'flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium transition',
+                    active ? 'bg-background text-foreground shadow-sm ring-1 ring-border' : 'text-muted-foreground hover:text-foreground',
+                  )}>
+                  <Icon className={cn('size-3.5', active && 'text-violet-300')} />
+                  <span className="hidden sm:inline">{label}</span>
+                </button>
+              </Tip>
+            )
+          })}
         </div>
 
-        <CardContent className="grid gap-6 px-5 py-5">
-          <Step n={1} title="Model" hint="Different AI models give different looks, lengths and prices. You can switch any time; your prompt and files are kept.">
-            <div className="flex gap-2">
+        <CardContent className="grid gap-4 p-4">
+          {/* What this mode does, in one line */}
+          <div className="flex items-start gap-2 rounded-md bg-violet-500/[0.06] px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+            <Info className="mt-0.5 size-3.5 shrink-0 text-violet-300" />
+            <p>
+              <span className="font-medium text-foreground">{modeHelp.tagline}.</span> {modeHelp.how}
+            </p>
+          </div>
+
+          <Field label="Model" hint="Different AI models give different looks, lengths and prices. Switching keeps your prompt and files.">
+            <div className="flex gap-1.5">
               <Select value={model.id} onValueChange={(id) => {
                 const m = catalog.models.find((x) => x.id === id)
                 if (m) selectModel(m, media, model)
               }}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectTrigger size="sm" className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {models.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
                 </SelectContent>
               </Select>
               <Tip label="Open this model’s official documentation">
-                <Button asChild variant="ghost" size="icon" aria-label="Model documentation">
+                <Button asChild variant="ghost" size="icon-sm" aria-label="Model documentation">
                   <a href={model.docs} target="_blank" rel="noreferrer"><ExternalLink /></a>
                 </Button>
               </Tip>
             </div>
-            {model.notes.map((n) => (
-              <p key={n} className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                <Info className="mt-0.5 size-3 shrink-0" /> {n}
-              </p>
-            ))}
-          </Step>
+            {model.notes.length > 0 && <p className="text-[11px] text-muted-foreground">{model.notes.join(' ')}</p>}
+          </Field>
 
-          {model.media.length > 0 && (
-            <Step n={2} title={mode === 'edit' || mode === 'extend' ? 'Your video' : mode === 'image' ? 'Your images' : 'References'}
-              hint="Pick files from this project (uploads or videos you made) or upload new ones. Accepted: JPG/PNG/WEBP/GIF images, MP4 video, WAV audio.">
-              <div className="grid gap-4">
-                {model.media.map((slot) => (
-                  <SlotField key={slot.name} slot={slot} items={media[slot.name] ?? []}
-                    onPick={() => setPicking(slot)}
-                    onRemove={(id) => setMedia((p) => ({ ...p, [slot.name]: (p[slot.name] ?? []).filter((a) => a.id !== id) }))} />
-                ))}
+          {requiredSlots.map(slotField)}
+
+          {optionalSlots.length > 0 && (
+            <details className="group rounded-md border" open={optionalCount > 0 || mode === 'reference'}>
+              <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-xs font-medium select-none">
+                <ChevronRight className="size-3.5 text-muted-foreground transition group-open:rotate-90" />
+                {mode === 'reference' ? 'Reference files' : 'Extra references'}
+                <span className="text-muted-foreground">{mode === 'reference' ? '(add at least one)' : '(optional)'}</span>
+                <Hint>Images, clips or audio the AI should take inspiration from, like a character, an object, a motion or a sound.</Hint>
+                {optionalCount > 0 && <Badge variant="secondary" className="ml-auto h-4 px-1.5 text-[10px]">{optionalCount}</Badge>}
+              </summary>
+              <div className="grid gap-3 border-t px-3 py-3">
+                {optionalSlots.map(slotField)}
                 {needsOneOf && (
-                  <p className="text-xs text-amber-300/90">
-                    Add at least one: {model.require_one_of.map((n) => model.media.find((s) => s.name === n)?.label.toLowerCase()).join(' or ')}.
+                  <p className="text-[11px] text-amber-300/90">
+                    Add at least one: {model.require_one_of.map((n) => model.media.find((x) => x.name === n)?.label.toLowerCase()).join(' or ')}.
                   </p>
                 )}
               </div>
-            </Step>
+            </details>
           )}
 
-          <Step n={model.media.length ? 3 : 2}
-            title={<>Prompt {!model.prompt_required && <span className="font-normal text-muted-foreground">(optional)</span>}</>}
+          <Field label={<>Prompt {!model.prompt_required && <span className="font-normal text-muted-foreground">(optional)</span>}</>}
             hint={PROMPT_HELP}
-            aside={<span className={`text-xs tabular-nums ${promptTooLong ? 'text-destructive' : 'text-muted-foreground'}`}>{prompt.length}/{model.prompt_max}</span>}>
-            <div className="relative">
-              <Textarea id="prompt" rows={4} className={cn('resize-none pb-11', speech.listening && 'border-red-400/60')}
+            aside={<span className={`text-[11px] tabular-nums ${promptTooLong ? 'text-destructive' : 'text-muted-foreground'}`}>{prompt.length}/{model.prompt_max}</span>}>
+            <div className={cn('rounded-md border bg-input/20 transition focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50', speech.listening && 'border-red-400/60')}>
+              <Textarea id="prompt" rows={3} className="min-h-20 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 dark:bg-transparent"
                 placeholder={PLACEHOLDER[mode]} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-              <div className="absolute right-2 bottom-2 left-2 flex items-center justify-end gap-1.5">
-                {speech.listening && (
-                  <span className="mr-auto flex items-center gap-1.5 text-xs text-red-300">
-                    <span className="size-2 animate-pulse rounded-full bg-red-400" /> Listening… speak your prompt
-                  </span>
-                )}
+              <div className="flex items-center gap-1 border-t px-1.5 py-1">
+                <details className="group/ideas relative">
+                  <summary className="flex h-6 cursor-pointer list-none items-center gap-1 rounded px-1.5 text-[11px] text-muted-foreground select-none hover:text-foreground">
+                    <Lightbulb className="size-3" /> Ideas
+                  </summary>
+                  <div className="absolute z-20 mt-1 grid w-[min(380px,85vw)] gap-1.5 rounded-md border bg-popover p-2 shadow-lg">
+                    {PROMPT_CHIPS.map((g) => (
+                      <div key={g.group} className="flex flex-wrap items-center gap-1">
+                        <span className="w-12 text-[10px] text-muted-foreground uppercase">{g.group}</span>
+                        {g.items.map((t) => (
+                          <button key={t} type="button" onClick={() => addChip(t)}
+                            className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition hover:border-violet-400/50 hover:bg-violet-500/10 hover:text-foreground">
+                            + {t}
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                    <p className="text-[10px] text-muted-foreground/80">e.g. {modeHelp.example}</p>
+                  </div>
+                </details>
                 {prompt && !speech.listening && (
                   <Tip label="Clear the prompt">
-                    <Button type="button" size="icon-xs" variant="ghost" className="mr-auto text-muted-foreground" onClick={() => setPrompt('')} aria-label="Clear prompt"><X /></Button>
+                    <Button type="button" size="icon-xs" variant="ghost" className="text-muted-foreground" onClick={() => setPrompt('')} aria-label="Clear prompt"><X /></Button>
                   </Tip>
                 )}
+                {speech.listening && (
+                  <span className="flex items-center gap-1.5 text-[11px] text-red-300">
+                    <span className="size-1.5 animate-pulse rounded-full bg-red-400" /> Listening…
+                  </span>
+                )}
                 {speech.supported && (
-                  <>
+                  <div className="ml-auto flex items-center gap-1">
                     <Tip label="Language you’ll speak in">
                       <span>
                         <Select value={lang} onValueChange={(v) => {
                           setLang(v)
                           try { localStorage.setItem('vs:speech-lang', v) } catch { /* ignore */ }
                         }}>
-                          <SelectTrigger size="sm" className="h-7 w-auto gap-1 border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none" aria-label="Dictation language">
+                          <SelectTrigger size="sm" className="h-6 w-auto gap-1 border-0 bg-transparent px-1.5 text-[11px] text-muted-foreground shadow-none dark:bg-transparent" aria-label="Dictation language">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -403,43 +439,30 @@ export function CreatePanel({ projectId, onCreated }: { projectId: string; onCre
                       </span>
                     </Tip>
                     <Tip label={speech.listening ? 'Stop listening' : 'Speak your prompt instead of typing. Uses your browser’s free speech recognition. The first time, allow the microphone.'}>
-                      <Button type="button" size="sm" variant={speech.listening ? 'destructive' : 'secondary'}
+                      <Button type="button" size="xs" variant={speech.listening ? 'destructive' : 'secondary'}
                         onClick={() => (speech.listening ? speech.stop() : speech.start(prompt, lang))}>
                         {speech.listening ? <><Square className="fill-current" /> Stop</> : <><Mic /> Speak</>}
                       </Button>
                     </Tip>
-                  </>
+                  </div>
                 )}
               </div>
             </div>
-            <div className="grid gap-1.5">
-              {PROMPT_CHIPS.map((g) => (
-                <div key={g.group} className="flex flex-wrap items-center gap-1">
-                  <span className="w-14 text-[11px] text-muted-foreground">{g.group}</span>
-                  {g.items.map((t) => (
-                    <button key={t} type="button" onClick={() => addChip(t)}
-                      className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition hover:border-violet-400/50 hover:bg-violet-500/10 hover:text-foreground">
-                      + {t}
-                    </button>
-                  ))}
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground/80">Example: {modeHelp.example}</p>
-          </Step>
+          </Field>
 
           {model.params.length > 0 && (
-            <Step n={model.media.length ? 4 : 3} title="Settings" hint="Length, quality and shape of the video. Hover the (i) next to each for details.">
-              <ParamFields model={model} params={params} setParam={(k, v) => setParams((p) => ({ ...p, [k]: v }))} />
-            </Step>
+            <ParamFields model={model} params={params} setParam={(k, v) => setParams((p) => ({ ...p, [k]: v }))} />
           )}
         </CardContent>
 
-        <CardFooter className="flex-col items-stretch gap-2 border-t bg-muted/10 px-5 py-4">
-          <p className="truncate text-center text-xs text-muted-foreground">{summary}</p>
+        <CardFooter className="grid gap-2 border-t bg-muted/10 p-3">
+          <div className="flex items-center justify-between gap-2 text-[11px]">
+            <span className="truncate text-muted-foreground">{summary}</span>
+            <CostPill estimate={estimate} loading={estimating} ready={ready} />
+          </div>
           <Tip label={ready ? 'Send to Higgsfield. Shortcut: ⌘/Ctrl + Enter. Uses credits from your Higgsfield account.' : 'Add your API key in Settings first'}>
             <span className="grid">
-              <Button type="submit" size="lg" disabled={!ready || submitting || !valid}>
+              <Button type="submit" disabled={!ready || submitting || !valid}>
                 {submitting ? <Loader2 className="animate-spin" /> : <Sparkles />}
                 {submitting ? (model.media.length ? 'Preparing files & submitting…' : 'Submitting…') : 'Generate'}
                 {!submitting && <kbd className="ml-1 hidden rounded border border-current/30 px-1 text-[10px] opacity-60 sm:inline">⌘↵</kbd>}
@@ -447,7 +470,7 @@ export function CreatePanel({ projectId, onCreated }: { projectId: string; onCre
             </span>
           </Tip>
           {!ready && (
-            <p className="text-center text-xs text-muted-foreground">
+            <p className="text-center text-[11px] text-muted-foreground">
               <Link to="/settings" className="underline underline-offset-4">Add your API key in Settings</Link> to start generating.
             </p>
           )}
@@ -482,23 +505,42 @@ export function CreatePanel({ projectId, onCreated }: { projectId: string; onCre
   )
 }
 
-function Step({ n, title, hint, aside, children }: {
-  n: number
-  title: React.ReactNode
+function CostPill({ estimate, loading, ready }: { estimate: Estimate | null; loading: boolean; ready: boolean }) {
+  if (!ready) return null
+  if (loading && !estimate) return <span className="flex items-center gap-1 text-muted-foreground"><Loader2 className="size-3 animate-spin" /> pricing…</span>
+  if (!estimate) return null
+  if (!estimate.available) {
+    return (
+      <Tip label={`${estimate.reason} The exact cost is always shown in your Higgsfield Console.`}>
+        <span className="cursor-help text-muted-foreground">price n/a</span>
+      </Tip>
+    )
+  }
+  return (
+    <Tip label="Estimated cost from Higgsfield for these settings. Failed or blocked videos are not charged.">
+      <span className={cn('flex cursor-help items-center gap-1 rounded-full border px-2 py-0.5 font-medium tabular-nums', loading && 'opacity-60')}>
+        <Coins className="size-3 text-amber-300" /> ≈ {estimate.credits} credits
+        <span className="text-muted-foreground">(${estimate.usd.toFixed(2)})</span>
+      </span>
+    </Tip>
+  )
+}
+
+function Field({ label, hint, aside, children }: {
+  label: React.ReactNode
   hint: string
   aside?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
-    <section className="grid gap-2.5">
-      <div className="flex items-center gap-2">
-        <span className="grid size-5 place-items-center rounded-full bg-violet-500/15 text-[11px] font-semibold text-violet-200">{n}</span>
-        <h3 className="text-sm font-medium">{title}</h3>
+    <div className="grid gap-1.5">
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs font-medium">{label}</span>
         <Hint>{hint}</Hint>
         {aside && <span className="ml-auto">{aside}</span>}
       </div>
       {children}
-    </section>
+    </div>
   )
 }
 
@@ -514,30 +556,28 @@ function SlotField({ slot, items, onPick, onRemove }: {
     ? `Required. The ${slot.kind} the model works on.`
     : `Optional. Up to ${limit} ${slot.kind}${limit > 1 ? 's' : ''} the AI uses as examples.`
   return (
-    <div className="grid gap-2">
+    <div className="grid gap-1.5">
       <div className="flex items-center gap-1.5">
-        <Label className="text-xs">
-          {slot.label} {slot.required && <span className="text-violet-300">*</span>}
-        </Label>
+        <span className="text-xs font-medium">{slot.label}{slot.required && <span className="text-violet-300"> *</span>}</span>
         <Hint>{explain}{slot.help ? ` ${slot.help}` : ''}</Hint>
-        <span className="ml-auto text-xs text-muted-foreground">{items.length}/{limit}</span>
+        <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">{items.length}/{limit}</span>
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         {items.map((a) => (
-          <div key={a.id} className="group relative w-28 overflow-hidden rounded-lg border" title={a.name}>
+          <div key={a.id} className="group relative w-24 overflow-hidden rounded-md border" title={a.name}>
             <MediaThumb kind={a.kind} url={a.url} className="aspect-video w-full" />
-            <p className="truncate px-1.5 py-1 text-[11px]">{a.name}</p>
+            <p className="truncate px-1.5 py-0.5 text-[10px] text-muted-foreground">{a.name}</p>
             <button type="button" onClick={() => onRemove(a.id)} aria-label={`Remove ${a.name}`}
-              className="absolute top-1 right-1 grid size-5 place-items-center rounded-full bg-black/70 text-white opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100">
-              <X className="size-3" />
+              className="absolute top-1 right-1 grid size-4 place-items-center rounded-full bg-black/70 text-white opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100">
+              <X className="size-2.5" />
             </button>
           </div>
         ))}
         {items.length < limit && (
           <button type="button" onClick={onPick}
-            className="flex aspect-[28/22] w-28 flex-col items-center justify-center gap-1 rounded-lg border border-dashed text-xs text-muted-foreground transition hover:border-violet-400/50 hover:bg-violet-500/5 hover:text-foreground">
-            <span className="flex items-center gap-1"><Plus className="size-3.5" /><Icon className="size-3.5" /></span>
-            {items.length ? 'Add more' : `Choose ${slot.kind}`}
+            className="flex aspect-[24/17] w-24 flex-col items-center justify-center gap-0.5 rounded-md border border-dashed text-[11px] text-muted-foreground transition hover:border-violet-400/50 hover:bg-violet-500/5 hover:text-foreground">
+            <span className="flex items-center gap-0.5"><Plus className="size-3" /><Icon className="size-3" /></span>
+            {items.length ? 'Add' : `Add ${slot.kind}`}
           </button>
         )}
       </div>
@@ -545,11 +585,11 @@ function SlotField({ slot, items, onPick, onRemove }: {
   )
 }
 
-function ParamLabel({ name, label, htmlFor, help }: { name: string; label: string; htmlFor?: string; help?: string }) {
+function ParamLabel({ name, label, help }: { name: string; label: string; help?: string }) {
   const text = help ?? PARAM_HELP[name]
   return (
     <span className="flex items-center gap-1.5">
-      <Label htmlFor={htmlFor} className="text-xs">{label}</Label>
+      <span className="text-xs font-medium">{label}</span>
       {text && <Hint>{text}</Hint>}
     </span>
   )
@@ -564,45 +604,43 @@ function ParamFields({ model, params, setParam }: {
   const enums = model.params.filter((p) => p.type === 'enum')
   const bools = model.params.filter((p) => p.type === 'bool')
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-3">
       {ints.map((p) => (
-        <div key={p.name} className="grid gap-3">
-          <div className="flex items-baseline justify-between">
+        <div key={p.name} className="grid gap-2">
+          <div className="flex items-center justify-between">
             {model.mode === 'extend' && p.name === 'duration'
               ? <ParamLabel name={p.name} label="Seconds to add"
                   help="How many new seconds the AI adds after your clip ends. More seconds take longer and usually cost more credits." />
               : <ParamLabel name={p.name} label={p.label} />}
-            <span className="font-mono text-sm tabular-nums">{String(params[p.name] ?? p.default)}{p.name === 'duration' && 's'}</span>
+            <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] tabular-nums">
+              {model.mode === 'extend' && p.name === 'duration' && '+'}{String(params[p.name] ?? p.default)}{p.name === 'duration' && 's'}
+            </span>
           </div>
           <Slider min={p.min ?? 0} max={p.max ?? 100} step={1} value={[Number(params[p.name] ?? p.default)]}
-            onValueChange={([v]) => setParam(p.name, v)} />
-          <div className="-mt-1 flex justify-between text-[10px] text-muted-foreground/70"><span>{p.min}s</span><span>{p.max}s</span></div>
+            onValueChange={([v]) => setParam(p.name, v)} aria-label={p.label} />
         </div>
       ))}
-      {enums.length > 0 && (
-        <div className="grid grid-cols-2 gap-3">
+      {(enums.length > 0 || bools.length > 0) && (
+        <div className="grid grid-cols-2 gap-x-3 gap-y-3">
           {enums.map((p) => (
-            <div key={p.name} className="grid gap-2">
+            <div key={p.name} className="grid gap-1.5">
               <ParamLabel name={p.name} label={p.label} />
               <Select value={String(params[p.name] ?? p.default)} onValueChange={(v) => setParam(p.name, v)}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectTrigger size="sm" className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {p.options?.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
           ))}
+          {bools.map((p) => (
+            <label key={p.name} htmlFor={p.name} className="flex h-full cursor-pointer items-center justify-between gap-2 self-end rounded-md border px-2.5 py-1.5">
+              <ParamLabel name={p.name} label={p.label} />
+              <Switch id={p.name} size="sm" checked={Boolean(params[p.name] ?? p.default)} onCheckedChange={(v) => setParam(p.name, v)} />
+            </label>
+          ))}
         </div>
       )}
-      {bools.map((p) => (
-        <div key={p.name} className="flex items-center justify-between rounded-lg border px-3 py-2.5">
-          <div className="grid gap-0.5">
-            <ParamLabel name={p.name} label={p.label} htmlFor={p.name} />
-            {p.help && <span className="text-xs text-muted-foreground">{p.help}</span>}
-          </div>
-          <Switch id={p.name} checked={Boolean(params[p.name] ?? p.default)} onCheckedChange={(v) => setParam(p.name, v)} />
-        </div>
-      ))}
     </div>
   )
 }

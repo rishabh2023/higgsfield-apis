@@ -22,6 +22,7 @@ class FakeGateway:
         self.verify_result: bool | None = True
         self.canceled: list[str] = []
         self.uploads = []
+        self.estimates = []
 
     async def submit(self, api_key, model, arguments, webhook_url):
         self.submits.append((api_key, model, arguments, webhook_url))
@@ -53,6 +54,12 @@ class FakeGateway:
     async def upload(self, api_key, data, content_type):
         self.uploads.append((content_type, len(data)))
         return f"https://upload.test/{len(self.uploads)}"
+
+    estimate_value = {"credits": 2.5, "usd": 0.16}
+
+    async def estimate(self, api_key, model, arguments):
+        self.estimates.append((model, arguments))
+        return self.estimate_value
 
     async def url_alive(self, url):
         return self.alive

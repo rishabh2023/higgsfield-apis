@@ -36,7 +36,8 @@ TABLES = {
 }
 # generations get polled constantly; only log meaningful changes, not poll bookkeeping.
 _GEN_WATCH = ["status", "hf_request_id", "video_url", "output_asset_id", "arguments_json", "prompt",
-              "params_json", "media_json", "project_id", "error", "correlation_id", "finished_at"]
+              "params_json", "media_json", "project_id", "error", "correlation_id", "finished_at",
+              "est_credits"]
 
 _lock = threading.Lock()
 
@@ -48,6 +49,8 @@ def path_for(db_path: Path) -> Path:
 def trigger_sql() -> str:
     parts = ["CREATE TABLE IF NOT EXISTS _changes (seq INTEGER PRIMARY KEY AUTOINCREMENT, tbl TEXT NOT NULL, key TEXT NOT NULL, op TEXT NOT NULL);"]
     for t, pk in TABLES.items():
+        # Recreate on every start so trigger changes reach existing databases.
+        parts += [f"DROP TRIGGER IF EXISTS _led_{t}_{k};" for k in ("ins", "upd", "del")]
         parts.append(
             f"CREATE TRIGGER IF NOT EXISTS _led_{t}_ins AFTER INSERT ON {t} "
             f"BEGIN INSERT INTO _changes (tbl, key, op) VALUES ('{t}', NEW.{pk}, 'upsert'); END;"

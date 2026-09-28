@@ -89,7 +89,7 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
 
   return (
     <Card className="gap-0 overflow-hidden py-0">
-      <div className={cn('relative w-full bg-black/40', g.status === 'completed' && videoSrc ? ASPECT_CLASS[aspect] ?? 'aspect-video' : 'aspect-video')}>
+      <div className={cn('relative w-full bg-black/40', g.status === 'completed' && videoSrc ? ASPECT_CLASS[aspect] ?? 'aspect-video' : g.is_active ? 'aspect-video' : 'min-h-40')}>
         {g.status === 'completed' && videoSrc ? (
           <video src={videoSrc} controls playsInline loop preload="metadata" className="size-full object-contain"
             onLoadedMetadata={(e) => Number.isFinite(e.currentTarget.duration) && setLength(e.currentTarget.duration)} />
@@ -103,12 +103,12 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
             </div>
           </div>
         ) : (
-          <div className="absolute inset-0 grid place-items-center p-6 text-center">
+          <div className="absolute inset-0 grid place-items-center p-4 text-center">
             {isCreditError(g.error) ? (
               <div className="flex max-w-sm flex-col items-center gap-2 text-sm">
                 <CreditCard className="size-6 text-amber-400" />
                 <p className="font-medium text-foreground">Not enough Higgsfield credits</p>
-                <p className="text-muted-foreground">Higgsfield stopped this request because your balance is too low. You were not charged. Top up, then generate again.</p>
+                <p className="text-xs text-muted-foreground">Your balance is too low for this request. You were not charged.</p>
                 <Button asChild size="sm" className="mt-1">
                   <a href={TOP_UP_URL} target="_blank" rel="noreferrer"><CreditCard /> Top up credits</a>
                 </Button>
@@ -116,14 +116,14 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
             ) : (
               <div className="flex max-w-sm flex-col items-center gap-2 text-sm text-muted-foreground">
                 {g.status === 'canceled' ? <Ban className="size-6" /> : <AlertTriangle className="size-6 text-amber-400" />}
-                <p className="line-clamp-4">{g.error ?? st.label}</p>
+                <p className="line-clamp-3 text-xs">{g.error ?? st.label}</p>
               </div>
             )}
           </div>
         )}
       </div>
 
-      <CardContent className="grid gap-2 pt-4">
+      <CardContent className="grid gap-1.5 px-3 pt-3">
         <div className="flex flex-wrap items-center gap-1.5">
           <Tip label={STATUS_HELP[g.status] ?? st.label}>
             <Badge className={cn('cursor-help border-0', st.tone)}>{st.label}</Badge>
@@ -137,9 +137,9 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
           <span className="text-xs text-muted-foreground">{model?.name ?? g.model}</span>
         </div>
         {g.prompt ? (
-          <p className="line-clamp-2 text-sm leading-relaxed">{g.prompt}</p>
+          <p className="line-clamp-2 text-[13px] leading-snug">{g.prompt}</p>
         ) : (
-          <p className="text-sm text-muted-foreground italic">No prompt</p>
+          <p className="text-[13px] text-muted-foreground italic">No prompt</p>
         )}
         {(g.mode === 'edit' || g.mode === 'extend') && (g.media.video_url?.[0] || g.media.video_urls?.[0]) && (
           <p className="text-xs text-muted-foreground">
@@ -161,7 +161,7 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
         )}
         <div className="flex flex-wrap gap-1">
           {Object.entries(g.params).map(([k, v]) => (
-            <Badge key={k} variant="outline" className="font-normal text-muted-foreground">
+            <Badge key={k} variant="outline" className="h-4 px-1.5 text-[10px] font-normal text-muted-foreground">
               {k === 'duration' ? `${v}s` : typeof v === 'boolean' ? (v ? k.replace('generate_', '') : `no ${k.replace('generate_', '')}`) : String(v)}
             </Badge>
           ))}
@@ -181,20 +181,20 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
         )}
       </CardContent>
 
-      <CardFooter className="flex-wrap justify-end gap-1 pb-4">
+      <CardFooter className="flex-wrap justify-end gap-1 px-3 pt-1 pb-3">
         {g.can_cancel && (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => act(async () => onUpdate(await api.cancel(g.id)), 'Canceled')}>
+          <Button size="xs" variant="outline" disabled={busy} onClick={() => act(async () => onUpdate(await api.cancel(g.id)), 'Canceled')}>
             <X /> Cancel
           </Button>
         )}
         {refreshable && (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => act(async () => onUpdate(await api.refresh(g.id)))}>
+          <Button size="xs" variant="outline" disabled={busy} onClick={() => act(async () => onUpdate(await api.refresh(g.id)))}>
             <RefreshCw className={cn(busy && 'animate-spin')} /> Check again
           </Button>
         )}
         {['failed', 'nsfw', 'rejected', 'canceled'].includes(g.status) && (
           <Tip label="Open the form with the same prompt, settings and files so you can pick a different model">
-            <Button size="sm" variant="outline" onClick={() => studio({ from: g.id })}>
+            <Button size="xs" variant="outline" onClick={() => studio({ from: g.id })}>
               <Shuffle /> Try another model
             </Button>
           </Tip>
@@ -202,17 +202,17 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
         {out && g.status === 'completed' && (
           <>
             <Tip label="Save the MP4 to your computer (a copy is also kept in the app)">
-              <Button size="sm" asChild>
+              <Button size="xs" asChild>
                 <a href={`${out.url}?download=1`} download><Download /> Download</a>
               </Button>
             </Tip>
             <Tip label="Change something in this video (weather, colours, objects, style) while keeping its timing">
-              <Button size="sm" variant="outline" onClick={() => studio({ mode: 'edit', source: out.id })}>
+              <Button size="xs" variant="outline" onClick={() => studio({ mode: 'edit', source: out.id })}>
                 <Wand2 /> Edit
               </Button>
             </Tip>
             <Tip label="Make this video longer: the AI continues it past its last frame">
-              <Button size="sm" variant="outline" onClick={() => studio({ mode: 'extend', source: out.id })}>
+              <Button size="xs" variant="outline" onClick={() => studio({ mode: 'extend', source: out.id })}>
                 <FastForward /> Extend
               </Button>
             </Tip>
@@ -255,7 +255,7 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
         )}
       </CardFooter>
       {(g.request_id || g.correlation_id) && (
-        <p className="truncate border-t px-4 py-2 font-mono text-[10px] text-muted-foreground/70">
+        <p className="truncate border-t px-3 py-1.5 font-mono text-[10px] text-muted-foreground/60">
           {[g.request_id && `req ${g.request_id}`, g.correlation_id && `corr ${g.correlation_id}`].filter(Boolean).join(' · ')}
         </p>
       )}

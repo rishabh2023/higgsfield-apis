@@ -165,6 +165,8 @@ _GENERATION_COLUMNS = {
     "media_json": "TEXT NOT NULL DEFAULT '{}'",
     "output_asset_id": "TEXT",
     "fingerprint": "TEXT",
+    "est_credits": "REAL",
+    "est_usd": "REAL",
 }
 
 
