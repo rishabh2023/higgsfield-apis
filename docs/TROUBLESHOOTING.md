@@ -42,27 +42,11 @@ Nothing was generated and you weren't charged. Just click **Generate** again.
 It still plays from Higgsfield. Click **Retry** on the card. After about 7 days Higgsfield deletes its copy,
 so retry before then.
 
-### I updated the app (git pull) and something looks broken
-Stop it with Ctrl + C and run `./start.sh` again. The server part doesn't reload by itself.
-Your projects and videos are kept.
-
-### The Speak button is missing or says "Microphone access was blocked"
-- Use **Chrome, Edge or Safari**. Firefox has no built-in speech recognition, so the button is hidden there.
-- Click the 🔒 or 🎤 icon in the address bar, allow the microphone, and click **Speak** again.
-- Dictation needs an internet connection, because the browser sends the audio to its speech service.
-
-### The app says the database was damaged / "rebuilt database from ledger"
-That's the safety net working. The broken file was moved aside (`app.db.corrupt-…`, never deleted) and
-everything was rebuilt from `backend/data/ledger.jsonl`. To run the rebuild by hand (stop the app first):
-```bash
-cd backend && uv run python -m app.recover --check   # see what the ledger holds
-cd backend && uv run python -m app.recover           # rebuild (the current DB is kept aside)
-```
-Daily copies of the database are also kept in `backend/data/backups/` (the last 7 days).
-
-### Back up everything / move to another computer
-Copy the whole `backend/data` folder. It holds your videos, reference files, ledger, backups and the key
-that unlocks your saved API key.
+### "…: Extra inputs are not permitted" or "Not Found" right after updating
+The web page updated but the server was still running the old version (copies started before
+2026-09-28 didn't reload by themselves). Nothing was sent to Higgsfield and nothing was charged.
+Stop the app with Ctrl + C and run `./start.sh` again. Newer versions reload the server automatically
+when the code changes.
 
 ### Start over completely
 Stop the app, delete the `backend/data` folder (this removes the saved key, projects and **all saved videos**), and run `./start.sh`.

@@ -52,7 +52,7 @@ export BACKEND_PORT="${BACKEND_PORT:-$(free_port 8010)}"
 export FRONTEND_PORT="${FRONTEND_PORT:-$(free_port 5173)}"
 
 say "Starting backend on port ${BACKEND_PORT}..."
-(cd backend && exec uv run --python 3.12 uvicorn app.main:app --host 127.0.0.1 --port "${BACKEND_PORT}" --log-level warning) &
+(cd backend && exec uv run --python 3.12 uvicorn app.main:app --host 127.0.0.1 --port "${BACKEND_PORT}" --log-level warning --reload --reload-dir app) &
 BACKEND_PID=$!
 trap 'kill ${BACKEND_PID} 2>/dev/null || true' EXIT INT TERM
 
