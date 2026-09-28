@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 
-from app import catalog, db, media, projects, service
+from app import catalog, db, media, projects, service, storage
 from app.config import get_settings
 from app.identity import current_workspace, require_app_header
 from app.poller import Poller
@@ -43,14 +43,64 @@ app.add_middleware(
 Mutation = Depends(require_app_header)
 
 
+# Bumped whenever the API contract changes; the UI compares it to spot a stale server.
+API_VERSION = 4
+
+
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True}
+    return {"ok": True, "api_version": API_VERSION}
+
+
+@app.get("/api/version")
+def version() -> dict:
+    return {"api_version": API_VERSION}
 
 
 @app.get("/api/stats")
 def get_stats(workspace_id: str = Depends(current_workspace)):
     return service.stats(workspace_id)
+
+
+# ------------------------------------------------------------------ storage & raw data
+
+
+class DeleteFiles(BaseModel):
+    asset_ids: list[str]
+
+
+class ClearScope(BaseModel):
+    scope: Literal["failed", "unused_uploads", "everything"]
+
+
+@app.get("/api/storage")
+def storage_files(workspace_id: str = Depends(current_workspace)):
+    return storage.list_files(workspace_id)
+
+
+@app.post("/api/storage/delete", dependencies=[Mutation])
+def storage_delete(body: DeleteFiles, workspace_id: str = Depends(current_workspace)):
+    return {"deleted": storage.delete_files(workspace_id, body.asset_ids)}
+
+
+@app.post("/api/storage/clear", dependencies=[Mutation])
+def storage_clear(body: ClearScope, workspace_id: str = Depends(current_workspace)):
+    return storage.clear(workspace_id, body.scope)
+
+
+@app.get("/api/generations/{generation_id}/raw")
+def generation_raw(generation_id: str, workspace_id: str = Depends(current_workspace)):
+    return storage.raw_generation(workspace_id, generation_id)
+
+
+@app.get("/api/ledger")
+def ledger_entries(limit: int = 200, workspace_id: str = Depends(current_workspace)):
+    return storage.ledger_tail(workspace_id, min(max(limit, 1), 2000))
+
+
+@app.post("/api/ledger/compact", dependencies=[Mutation])
+def ledger_compact(workspace_id: str = Depends(current_workspace)):
+    return storage.compact_ledger()
 
 
 # ------------------------------------------------------------------ models

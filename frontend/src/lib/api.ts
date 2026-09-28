@@ -121,6 +121,41 @@ export type Stats = {
   last_backup: string | null
 }
 
+export type StoredFile = Asset & {
+  project_name: string
+  model: string | null
+  on_disk: boolean
+  path: string | null
+  used_as_input: boolean
+  remote_url: string | null
+}
+
+export type StorageList = { files: StoredFile[]; total_bytes: number; counts: { outputs: number; uploads: number } }
+
+export type LedgerEntry = {
+  ts: string
+  op: 'upsert' | 'delete'
+  table: string
+  key: string
+  status?: string
+  row: Record<string, unknown> | null
+}
+
+export type RawGeneration = {
+  generation_id: string
+  higgsfield_request_id: string | null
+  correlation_id: string | null
+  model: string
+  status: string
+  request_sent_to_higgsfield: Record<string, unknown>
+  higgsfield_response: Record<string, unknown> | null
+  status_history: { ts: string; op: string; status: string | null; error: string | null }[]
+  record: Record<string, unknown>
+}
+
+/** Must match API_VERSION in backend/app/main.py. */
+export const EXPECTED_API_VERSION = 4
+
 export class ApiError extends Error {
   status: number
   detail: unknown
@@ -185,6 +220,15 @@ export const api = {
   retryDownload: (id: string) => request<Asset>(`/assets/${id}/retry-download`, { method: 'POST' }),
 
   stats: () => request<Stats>('/stats'),
+  version: () => request<{ api_version: number }>('/version'),
+  storage: () => request<StorageList>('/storage'),
+  deleteFiles: (asset_ids: string[]) => request<{ deleted: number }>('/storage/delete', json('POST', { asset_ids })),
+  clearStorage: (scope: 'failed' | 'unused_uploads' | 'everything') =>
+    request<Record<string, number>>('/storage/clear', json('POST', { scope })),
+  raw: (generationId: string) => request<RawGeneration>(`/generations/${generationId}/raw`),
+  ledger: (limit = 200) =>
+    request<{ file: string; bytes: number; total_lines: number; entries: LedgerEntry[] }>(`/ledger?limit=${limit}`),
+  compactLedger: () => request<{ bytes_before: number; bytes_after: number }>('/ledger/compact', { method: 'POST' }),
   generation: (id: string) => request<Generation>(`/generations/${id}`),
   generations: (projectId: string) => request<Generation[]>(`/projects/${projectId}/generations`),
   generate: (projectId: string, body: CreateGenerationBody, idempotencyKey: string) =>

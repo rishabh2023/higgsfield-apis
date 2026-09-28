@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import {
   AlertTriangle, Ban, BookmarkCheck, BookmarkPlus, Download, FastForward, Images, Loader2, MoreHorizontal,
-  RefreshCw, Shuffle, Trash2, Wand2, X,
+  Clock, CreditCard, FileJson, RefreshCw, Shuffle, Trash2, Wand2, X,
 } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 
+import { Tip } from '@/components/hint'
 import { MediaThumb } from '@/components/media'
+import { RawDialog } from '@/components/raw-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
@@ -15,6 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { api, type Generation } from '@/lib/api'
 import { useApp } from '@/lib/app-context'
+import { isCreditError, STATUS_HELP, TOP_UP_URL } from '@/lib/help'
 import { cn } from '@/lib/utils'
 
 const STATUS: Record<string, { label: string; tone: string }> = {
@@ -57,6 +60,8 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
   const { catalog } = useApp()
   const navigate = useNavigate()
   const [busy, setBusy] = useState(false)
+  const [rawOpen, setRawOpen] = useState(false)
+  const [length, setLength] = useState<number | null>(null)
   const elapsed = useElapsed(g.created_at, g.is_active)
   const st = STATUS[g.status] ?? { label: g.status, tone: 'bg-muted' }
   const model = catalog?.models.find((m) => m.id === g.model)
@@ -86,7 +91,8 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
     <Card className="gap-0 overflow-hidden py-0">
       <div className={cn('relative w-full bg-black/40', g.status === 'completed' && videoSrc ? ASPECT_CLASS[aspect] ?? 'aspect-video' : 'aspect-video')}>
         {g.status === 'completed' && videoSrc ? (
-          <video src={videoSrc} controls playsInline loop preload="metadata" className="size-full object-contain" />
+          <video src={videoSrc} controls playsInline loop preload="metadata" className="size-full object-contain"
+            onLoadedMetadata={(e) => Number.isFinite(e.currentTarget.duration) && setLength(e.currentTarget.duration)} />
         ) : g.is_active ? (
           <div className="absolute inset-0 grid place-items-center overflow-hidden">
             <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-violet-500/10 via-transparent to-sky-500/10" />
@@ -98,17 +104,35 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
           </div>
         ) : (
           <div className="absolute inset-0 grid place-items-center p-6 text-center">
-            <div className="flex max-w-sm flex-col items-center gap-2 text-sm text-muted-foreground">
-              {g.status === 'canceled' ? <Ban className="size-6" /> : <AlertTriangle className="size-6 text-amber-400" />}
-              <p className="line-clamp-4">{g.error ?? st.label}</p>
-            </div>
+            {isCreditError(g.error) ? (
+              <div className="flex max-w-sm flex-col items-center gap-2 text-sm">
+                <CreditCard className="size-6 text-amber-400" />
+                <p className="font-medium text-foreground">Not enough Higgsfield credits</p>
+                <p className="text-muted-foreground">Higgsfield stopped this request because your balance is too low. You were not charged. Top up, then generate again.</p>
+                <Button asChild size="sm" className="mt-1">
+                  <a href={TOP_UP_URL} target="_blank" rel="noreferrer"><CreditCard /> Top up credits</a>
+                </Button>
+              </div>
+            ) : (
+              <div className="flex max-w-sm flex-col items-center gap-2 text-sm text-muted-foreground">
+                {g.status === 'canceled' ? <Ban className="size-6" /> : <AlertTriangle className="size-6 text-amber-400" />}
+                <p className="line-clamp-4">{g.error ?? st.label}</p>
+              </div>
+            )}
           </div>
         )}
       </div>
 
       <CardContent className="grid gap-2 pt-4">
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge className={cn('border-0', st.tone)}>{st.label}</Badge>
+          <Tip label={STATUS_HELP[g.status] ?? st.label}>
+            <Badge className={cn('cursor-help border-0', st.tone)}>{st.label}</Badge>
+          </Tip>
+          {length !== null && (
+            <Tip label="Actual length of the saved video file">
+              <Badge variant="secondary" className="cursor-help gap-1"><Clock className="size-3" />{length.toFixed(1)}s</Badge>
+            </Tip>
+          )}
           <Badge variant="outline">{mode?.name ?? g.mode}</Badge>
           <span className="text-xs text-muted-foreground">{model?.name ?? g.model}</span>
         </div>
@@ -116,6 +140,12 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
           <p className="line-clamp-2 text-sm leading-relaxed">{g.prompt}</p>
         ) : (
           <p className="text-sm text-muted-foreground italic">No prompt</p>
+        )}
+        {(g.mode === 'edit' || g.mode === 'extend') && (g.media.video_url?.[0] || g.media.video_urls?.[0]) && (
+          <p className="text-xs text-muted-foreground">
+            {g.mode === 'edit' ? 'Edited from' : 'Extended from'}{' '}
+            <span className="text-foreground">“{(g.media.video_url?.[0] || g.media.video_urls?.[0]).name}”</span>
+          </p>
         )}
         {inputs.length > 0 && (
           <div className="flex items-center gap-1.5 overflow-hidden">
@@ -163,21 +193,29 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
           </Button>
         )}
         {['failed', 'nsfw', 'rejected', 'canceled'].includes(g.status) && (
-          <Button size="sm" variant="outline" onClick={() => studio({ from: g.id })}>
-            <Shuffle /> Try another model
-          </Button>
+          <Tip label="Open the form with the same prompt, settings and files so you can pick a different model">
+            <Button size="sm" variant="outline" onClick={() => studio({ from: g.id })}>
+              <Shuffle /> Try another model
+            </Button>
+          </Tip>
         )}
         {out && g.status === 'completed' && (
           <>
-            <Button size="sm" asChild title="Download the MP4 to your computer">
-              <a href={`${out.url}?download=1`} download><Download /> Download</a>
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => studio({ mode: 'edit', source: out.id })}>
-              <Wand2 /> Edit
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => studio({ mode: 'extend', source: out.id })}>
-              <FastForward /> Extend
-            </Button>
+            <Tip label="Save the MP4 to your computer (a copy is also kept in the app)">
+              <Button size="sm" asChild>
+                <a href={`${out.url}?download=1`} download><Download /> Download</a>
+              </Button>
+            </Tip>
+            <Tip label="Change something in this video (weather, colours, objects, style) while keeping its timing">
+              <Button size="sm" variant="outline" onClick={() => studio({ mode: 'edit', source: out.id })}>
+                <Wand2 /> Edit
+              </Button>
+            </Tip>
+            <Tip label="Make this video longer: the AI continues it past its last frame">
+              <Button size="sm" variant="outline" onClick={() => studio({ mode: 'extend', source: out.id })}>
+                <FastForward /> Extend
+              </Button>
+            </Tip>
           </>
         )}
         {!g.is_active && (
@@ -202,6 +240,9 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
               <DropdownMenuItem onClick={() => studio({ from: g.id })}>
                 <Shuffle /> Try another model
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setRawOpen(true)}>
+                <FileJson /> View raw data
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem variant="destructive" onClick={() => act(async () => {
                 await api.removeGeneration(g.id)
@@ -218,6 +259,7 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
           {[g.request_id && `req ${g.request_id}`, g.correlation_id && `corr ${g.correlation_id}`].filter(Boolean).join(' · ')}
         </p>
       )}
+      <RawDialog generationId={g.id} open={rawOpen} onOpenChange={setRawOpen} />
     </Card>
   )
 }

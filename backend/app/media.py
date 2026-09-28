@@ -168,6 +168,8 @@ def _delete_rows_and_files(rows: list[dict[str, Any]]) -> None:
     for a in rows:
         if a["local_path"]:
             Path(a["local_path"]).unlink(missing_ok=True)
+            if a["source"] == "generation":
+                Path(a["local_path"]).with_suffix(".json").unlink(missing_ok=True)
 
 
 def delete_many(rows: list[dict[str, Any]]) -> None:

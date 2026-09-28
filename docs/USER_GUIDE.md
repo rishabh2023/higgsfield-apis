@@ -1,7 +1,9 @@
 # User guide
 
 The app has two pages in the left sidebar: **Projects** (where you make videos) and **Settings**
-(your API key, storage info, and the list of models).
+(your API key, stored files, and raw records).
+
+**Tip:** hover any **ⓘ** icon, button, status badge or mode for a plain-language explanation.
 
 ## 1. Connect Higgsfield (once)
 
@@ -33,6 +35,15 @@ Rename or delete a project with the **⋯** button at the top right. Deleting it
 | **References** | Reference images, videos and/or audio, plus a prompt describing how to use them | Seedance 2.0, Seedance 2.5 |
 | **Edit** | A video plus a prompt describing the change ("make it snow") | Seedance 2.5 Edit, Kling O3 Edit (3–15.5s source) |
 | **Extend** | A video plus a prompt describing what happens next | Seedance 2.5 Extend (4–30s more) |
+
+**What does Extend do exactly?** It continues your video past its last frame. The AI adds the number of
+seconds you choose (4–30) of new footage that picks up where your clip ends, in the same framing and look.
+The prompt describes what happens next ("the car drives into a tunnel"). Higgsfield's docs don't say
+whether the returned file contains only the new part or your clip plus the new part, so every finished
+video shows its **real length** (the ⏱ badge) and you can see for yourself.
+
+**Prompt helpers:** click chips such as *drone aerial shot*, *golden hour light* or *slow motion* to add
+them to your prompt. Press **⌘/Ctrl + Enter** to generate.
 
 The form changes to match the model you pick. It only shows options that model supports and tells you its
 limits. The **↗** icon next to the model opens its official documentation.
@@ -80,6 +91,7 @@ Every finished video has these buttons:
 | **Generating** | Higgsfield is making the video | Wait, usually a few minutes |
 | **Completed** | Done 🎉 | Play it, edit it, extend it or download it |
 | **Failed** | Higgsfield couldn't make it | Try again. You are not charged |
+| **Not enough Higgsfield credits** | Your Higgsfield balance is too low for this model/length | Click **Top up credits**, add credits in the Higgsfield Console, then generate again. You were not charged |
 | **Moderated** | Blocked by the content filter | Change the prompt or files. You are not charged |
 | **Rejected** | Refused before starting (for example not enough credits, too many videos running at once, or a file couldn't be sent) | Read the message on the card |
 | **Outcome unknown** | The connection dropped while sending, so we can't tell whether Higgsfield received it | Check the [Higgsfield Console](https://console.higgsfield.ai) before trying again. The app **never** resends on its own, so you won't be charged twice |
@@ -88,6 +100,17 @@ Every finished video has these buttons:
 
 "Saving a copy to this computer…" under a video means it's still downloading. Until that finishes, it plays
 from Higgsfield.
+
+## 6. Settings
+
+| Tab | What it's for |
+|---|---|
+| **General** | Your API key, a summary of your data, and the list of models (each links to its docs) |
+| **Storage** | Every stored clip (generated and uploaded) with preview, project, size and date. Select and **Delete selected**, or use **Quick clean-up** (*Clear failed attempts*, *Clear unused uploads*). The **Danger zone** clears everything (you must type DELETE); your API key is kept |
+| **Raw data** | The plain-text ledger behind the app, one line per change, newest first. Click a line to see the full record. **Compact ledger** makes it smaller without losing anything |
+
+Each video card also has **⋯ → View raw data**: the exact request sent to Higgsfield, its raw answer,
+and every status change. Useful if you contact Higgsfield support.
 
 ## Good to know
 

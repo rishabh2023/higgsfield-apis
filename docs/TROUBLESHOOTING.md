@@ -21,6 +21,15 @@ Make sure you don't include any spaces.
 ### "Saved, but Higgsfield could not be reached"
 Your internet connection or Higgsfield was down for a moment. The key is saved anyway. Try generating.
 
+### "Your credit balance is too low" / "Not enough Higgsfield credits"
+This message comes from Higgsfield: your account doesn't have enough credits for that model and length.
+Edit, extend, longer durations and higher resolutions cost more than a short text-to-video. You were **not
+charged**. Top up at [console.higgsfield.ai](https://console.higgsfield.ai), then click **Generate** again.
+A failed attempt doesn't trigger the "already made this video" warning.
+
+### A yellow bar says "The app's server is running an older version"
+The page updated but the server didn't. Press Ctrl + C in the terminal and run `./start.sh` again.
+
 ### "Insufficient Higgsfield credits" or "Maximum number of concurrent requests"
 Add credits in the Higgsfield Console, or wait for your running videos to finish first.
 

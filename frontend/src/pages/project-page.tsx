@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
-import { ArrowLeft, Film, Images, MoreHorizontal, Pencil, Sparkles, Trash2, Wand2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowLeft, Film, Images, MoreHorizontal, Pencil, Search, Sparkles, Trash2, Wand2 } from 'lucide-react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 
 import { PageHeader } from '@/components/app-shell'
+import { isCreditError, TOP_UP_URL } from '@/lib/help'
+import { Hint, Tip } from '@/components/hint'
 import { CreatePanel } from '@/components/create-panel'
 import { GenerationCard } from '@/components/generation-card'
 import { Dropzone, MediaThumb } from '@/components/media'
@@ -19,6 +21,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -38,13 +41,43 @@ export function ProjectPage() {
   const [editing, setEditing] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
+  const prevStatus = useRef<Record<string, string>>({})
   const load = useCallback(async () => {
     try {
-      setGens(await api.generations(projectId))
+      const list = await api.generations(projectId)
+      // Tell the user when something they were waiting for finishes.
+      for (const g of list) {
+        const before = prevStatus.current[g.id]
+        if (before && before !== g.status && ['submitting', 'queued', 'in_progress'].includes(before)) {
+          const label = (g.prompt ?? 'Your video').slice(0, 60)
+          if (g.status === 'completed') {
+            toast.success('Video ready 🎬', { description: label })
+            if (document.hidden) document.title = '✓ Video ready · Video Studio'
+          } else if (['failed', 'nsfw'].includes(g.status)) {
+            if (isCreditError(g.error)) {
+              toast.error('Not enough Higgsfield credits', {
+                description: 'Your balance is too low for this request. You were not charged.',
+                action: { label: 'Top up', onClick: () => window.open(TOP_UP_URL, '_blank', 'noopener') },
+                duration: 12000,
+              })
+            } else {
+              toast.error('Video could not be made', { description: `${g.error ?? label}. You were not charged.` })
+            }
+          }
+        }
+      }
+      prevStatus.current = Object.fromEntries(list.map((g) => [g.id, g.status]))
+      setGens(list)
     } catch (err) {
       toast.error((err as Error).message)
     }
   }, [projectId])
+
+  useEffect(() => {
+    const reset = () => { if (!document.hidden) document.title = 'Video Studio' }
+    document.addEventListener('visibilitychange', reset)
+    return () => document.removeEventListener('visibilitychange', reset)
+  }, [])
 
   useEffect(() => {
     api.project(projectId).then(setProject).catch(() => navigate('/projects', { replace: true }))
@@ -97,11 +130,17 @@ export function ProjectPage() {
 
       <Tabs value={tab} onValueChange={setTab} className="mx-auto max-w-7xl gap-6 px-4 py-6 sm:px-6">
         <TabsList>
-          <TabsTrigger value="create"><Sparkles /> Create</TabsTrigger>
-          <TabsTrigger value="videos">
-            <Film /> Videos {gens && gens.length > 0 && <Badge variant="secondary" className="ml-1">{gens.length}</Badge>}
-          </TabsTrigger>
-          <TabsTrigger value="references"><Images /> References</TabsTrigger>
+          <Tip label="Make a new video: from text, an image, references, or by editing/extending one you made">
+            <TabsTrigger value="create"><Sparkles /> Create</TabsTrigger>
+          </Tip>
+          <Tip label="Every video in this project, with its status. Download, edit or extend from here.">
+            <TabsTrigger value="videos">
+              <Film /> Videos {gens && gens.length > 0 && <Badge variant="secondary" className="ml-1">{gens.length}</Badge>}
+            </TabsTrigger>
+          </Tip>
+          <Tip label="Your saved images, clips and audio to guide new videos">
+            <TabsTrigger value="references"><Images /> References</TabsTrigger>
+          </Tip>
         </TabsList>
 
         <TabsContent value="create" className="grid gap-6 lg:grid-cols-[minmax(0,480px)_1fr]">
@@ -120,8 +159,7 @@ export function ProjectPage() {
         </TabsContent>
 
         <TabsContent value="videos" className="grid gap-4">
-          {active > 0 && <p className="text-xs text-muted-foreground">{active} generating · updating every {POLL_MS / 1000}s</p>}
-          <GenerationGrid gens={gens} onUpdate={upsert} onRemove={remove} />
+          <VideosTab gens={gens} active={active} onUpdate={upsert} onRemove={remove} />
         </TabsContent>
 
         <TabsContent value="references">
@@ -152,6 +190,64 @@ export function ProjectPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  )
+}
+
+const FILTERS: Record<string, { label: string; match: (s: string) => boolean }> = {
+  all: { label: 'All statuses', match: () => true },
+  completed: { label: 'Completed', match: (s) => s === 'completed' },
+  running: { label: 'In progress', match: (s) => ['submitting', 'queued', 'in_progress'].includes(s) },
+  problems: { label: 'Needs attention', match: (s) => !['completed', 'submitting', 'queued', 'in_progress'].includes(s) },
+}
+
+function VideosTab({ gens, active, onUpdate, onRemove }: {
+  gens: Generation[] | null
+  active: number
+  onUpdate: (g: Generation) => void
+  onRemove: (id: string) => void
+}) {
+  const [q, setQ] = useState('')
+  const [status, setStatus] = useState('all')
+  const [mode, setMode] = useState('all')
+  const shown = useMemo(() => gens?.filter((g) =>
+    FILTERS[status].match(g.status)
+    && (mode === 'all' || g.mode === mode)
+    && (!q.trim() || (g.prompt ?? '').toLowerCase().includes(q.trim().toLowerCase())),
+  ) ?? null, [gens, q, status, mode])
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-52 flex-1 sm:max-w-xs">
+          <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search prompts…" className="pl-8" />
+        </div>
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+          <SelectContent>{Object.entries(FILTERS).map(([k, f]) => <SelectItem key={k} value={k}>{f.label}</SelectItem>)}</SelectContent>
+        </Select>
+        <Select value={mode} onValueChange={setMode}>
+          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All types</SelectItem>
+            <SelectItem value="text">Text to video</SelectItem>
+            <SelectItem value="image">Image to video</SelectItem>
+            <SelectItem value="reference">References</SelectItem>
+            <SelectItem value="edit">Edits</SelectItem>
+            <SelectItem value="extend">Extensions</SelectItem>
+          </SelectContent>
+        </Select>
+        <span className="ml-auto text-xs text-muted-foreground">
+          {active > 0 && <>{active} generating · updating every {POLL_MS / 1000}s · </>}
+          {shown?.length ?? 0} of {gens?.length ?? 0}
+        </span>
+      </div>
+      {gens && gens.length > 0 && shown?.length === 0 ? (
+        <p className="py-16 text-center text-sm text-muted-foreground">No videos match these filters.</p>
+      ) : (
+        <GenerationGrid gens={shown} onUpdate={onUpdate} onRemove={onRemove} />
+      )}
     </>
   )
 }
@@ -195,6 +291,10 @@ function ReferencesPanel({ projectId }: { projectId: string }) {
 
   return (
     <div className="grid gap-6">
+      <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        Files here can be picked in the Create form as references, start images or videos to edit.
+        <Hint>Uploads are checked and stored on this computer. They are only sent to Higgsfield when you generate with them.</Hint>
+      </p>
       <Dropzone projectId={projectId} onUploaded={(a) => setAssets((p) => [a, ...(p ?? [])])} />
       {assets === null ? (
         <Skeleton className="h-40" />
