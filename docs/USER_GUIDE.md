@@ -37,6 +37,16 @@ Rename or delete a project with the **⋯** button at the top right. Deleting it
 The form changes to match the model you pick. It only shows options that model supports and tells you its
 limits. The **↗** icon next to the model opens its official documentation.
 
+### Speaking your prompt 🎤
+Click **Speak** in the prompt box and talk. Your words appear as you speak. Click **Stop** when done.
+Pick your language in the small menu next to it (English US/India/UK, Hindi, Spanish and more).
+It uses your browser's free built-in speech recognition (Google's in Chrome and Edge, Apple's in Safari),
+with no key and no cost. The first time, the browser asks to use your microphone. Firefox doesn't support it,
+so the button is hidden there.
+
+### Your form is saved as you go
+If you refresh or close the tab, the prompt, settings and chosen files are still there when you come back.
+
 ### Adding files to a generation
 Click **Choose image / video / audio** in the form. You can pick from the project's References or its
 generated videos, or drop a new file right there.
@@ -52,7 +62,15 @@ Every finished video has these buttons:
 - **Extend**: opens Create in Extend mode to continue the video.
 - **⋯ → Use as reference**: starts a References-to-video generation that uses this clip.
 - **⋯ → Add to references**: saves the clip to the project's References tab for later.
-- **⋯ → Download**: saves the MP4.
+- **Download**: saves the MP4 to your computer with a readable name. Click it as soon as you like the result.
+- **⋯ → Try another model**: reopens Create with the same prompt, settings and files so you only pick a
+  different model. Failed videos show this button directly.
+
+### Protection against paying twice
+- If you click **Generate** for a video you've **already made** (same model, prompt, settings and files),
+  the app asks first: *Keep the existing one* or *Generate again (uses credits)*.
+- Clicking Generate twice, or again after a refresh or a dropped connection, never creates a second paid video.
+- The app never resends a request on its own.
 
 ## 5. What the statuses mean
 
@@ -74,7 +92,12 @@ from Higgsfield.
 ## Good to know
 
 - **Your videos are kept.** Higgsfield deletes outputs after about 7 days, so the app downloads every finished
-  video to `backend/data/media/`. When an old video or reference is used again, the app re-uploads it for you.
+  video right away to `backend/data/media/<workspace>/outputs/<id>.mp4`, with an `<id>.json` note beside it
+  (prompt, model, Higgsfield request ID). When an old video or reference is used again, the app re-uploads it for you.
+- **Nothing is lost if something breaks.** Every change is also written to a plain-text file,
+  `backend/data/ledger.jsonl`, and the database is copied daily to `backend/data/backups/`. If the database is
+  ever damaged or deleted, the app rebuilds itself from the ledger the next time it starts. Unfinished videos
+  keep going and missing files re-download, without paying again. **Settings → Your data** shows the counts.
 - **Costs:** each generation uses credits from your Higgsfield account. The price depends on the model,
   length and resolution.
 - Your projects, key and files belong to **this browser**. Another browser, or a private window, starts fresh.

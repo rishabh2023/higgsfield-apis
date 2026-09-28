@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ExternalLink, FastForward, Film, ImageIcon, Images, Info, Loader2, Plus, Sparkles, Type, Wand2, X } from 'lucide-react'
+import { ExternalLink, FastForward, Film, ImageIcon, Images, Info, Loader2, Mic, Plus, Sparkles, Square, Type, Wand2, X } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 
 import { AssetPicker, KIND_ICON, MediaThumb } from '@/components/media'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -17,6 +21,8 @@ import {
   type ModelSpec,
 } from '@/lib/api'
 import { canGenerate, useApp } from '@/lib/app-context'
+import { SPEECH_LANGS, useSpeech } from '@/lib/use-speech'
+import { cn } from '@/lib/utils'
 
 type Picked = Record<string, AssetBrief[]>
 
@@ -58,6 +64,44 @@ function carryMedia(prev: Picked, m: ModelSpec, prevModel?: ModelSpec): Picked {
   return next
 }
 
+type Draft = {
+  mode: ModeId
+  modelId: string
+  prompt: string
+  params: Record<string, unknown>
+  media: Picked
+  idemKey: string
+}
+
+// The in-progress form (and its pending request key) survives refreshes, so work isn't lost
+// and re-clicking Generate after a refresh can't pay for the same video twice.
+const draftKey = (projectId: string) => `vs:draft:${projectId}`
+function loadDraft(projectId: string): Draft | null {
+  try {
+    const raw = localStorage.getItem(draftKey(projectId))
+    return raw ? (JSON.parse(raw) as Draft) : null
+  } catch {
+    return null
+  }
+}
+function saveDraft(projectId: string, d: Draft) {
+  try {
+    localStorage.setItem(draftKey(projectId), JSON.stringify(d))
+  } catch {
+    /* storage full or blocked: the form still works, it just won't survive a refresh */
+  }
+}
+
+function readLang(): string {
+  try {
+    return localStorage.getItem('vs:speech-lang') ?? navigator.language ?? 'en-US'
+  } catch {
+    return 'en-US'
+  }
+}
+
+type Duplicate = { generation_id: string; status: string; message: string }
+
 function toBrief(a: Asset): AssetBrief {
   return { id: a.id, name: a.name, kind: a.kind, url: a.url }
 }
@@ -72,8 +116,12 @@ export function CreatePanel({ projectId, onCreated }: { projectId: string; onCre
   const [media, setMedia] = useState<Picked>({})
   const [picking, setPicking] = useState<MediaSlot | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [duplicate, setDuplicate] = useState<Duplicate | null>(null)
+  const [initialized, setInitialized] = useState(false)
+  const [lang, setLang] = useState(readLang)
   // Rotated only after the server answers, so a retry after a dropped connection is deduplicated.
   const idemKey = useRef(newIdempotencyKey())
+  const speech = useSpeech(setPrompt, (msg) => toast.error(msg))
 
   const models = useMemo(() => catalog?.models.filter((m) => m.mode === mode) ?? [], [catalog, mode])
   const model = catalog?.models.find((m) => m.id === modelId) ?? models[0]
@@ -90,14 +138,53 @@ export function CreatePanel({ projectId, onCreated }: { projectId: string; onCre
     if (m) selectModel(m, seed)
   }
 
-  // Initial model + deep links from video cards: ?mode=edit&source=<asset> or ?mode=reference&ref=<asset>
+  // Initial state, in priority order:
+  //   ?from=<generation>             "Try another model": same prompt, settings and files
+  //   ?mode=edit&source=<asset> | ?mode=reference&ref=<asset>   actions on video cards
+  //   saved draft for this project   survives page refresh
   useEffect(() => {
     if (!catalog) return
+    const from = search.get('from')
     const wantMode = search.get('mode') as ModeId | null
     const source = search.get('source')
     const ref = search.get('ref')
+    const clearLink = () => setSearch((p) => {
+      for (const k of ['mode', 'source', 'ref', 'from']) p.delete(k)
+      return p
+    }, { replace: true })
+
+    if (from) {
+      api.generation(from).then((g) => {
+        const m = catalog.models.find((x) => x.id === g.model)
+        if (!m) return
+        setMode(g.mode)
+        setModelId(m.id)
+        setPrompt(g.prompt ?? '')
+        setParams({ ...defaults(m), ...g.params })
+        setMedia(Object.fromEntries(Object.entries(g.media).map(([k, v]) => [k, v.filter((a) => a.url)])))
+        toast.info('Settings copied. Pick another model and generate.')
+      }).catch((e) => toast.error(e.message)).finally(() => {
+        setInitialized(true)
+        clearLink()
+      })
+      return
+    }
     if (!wantMode) {
-      if (!modelId) selectMode('text', {})
+      if (!initialized) {
+        const d = loadDraft(projectId)
+        const m = d && catalog.models.find((x) => x.id === d.modelId)
+        if (d && m) {
+          setMode(d.mode)
+          setModelId(m.id)
+          setPrompt(d.prompt)
+          setParams({ ...defaults(m), ...d.params })
+          setMedia(d.media)
+          idemKey.current = d.idemKey || idemKey.current
+        } else {
+          selectMode('text', {})
+        }
+        setInitialized(true)
+      }
       return
     }
     const id = source ?? ref
@@ -111,17 +198,17 @@ export function CreatePanel({ projectId, onCreated }: { projectId: string; onCre
         if (slot) seed[slot.name] = [toBrief(a)]
       }
       selectMode(wantMode, seed)
-      setSearch((p) => {
-        p.delete('mode')
-        p.delete('source')
-        p.delete('ref')
-        return p
-      }, { replace: true })
+      setInitialized(true)
+      clearLink()
     }
     if (id) api.assets(projectId, 'all').then((all) => apply(all.find((a) => a.id === id))).catch(() => apply())
     else apply()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog, search])
+
+  useEffect(() => {
+    if (initialized && modelId) saveDraft(projectId, { mode, modelId, prompt, params, media, idemKey: idemKey.current })
+  }, [initialized, projectId, mode, modelId, prompt, params, media])
 
   if (!catalog || !model) {
     return <Card className="h-96 animate-pulse" />
@@ -133,9 +220,9 @@ export function CreatePanel({ projectId, onCreated }: { projectId: string; onCre
   const needsOneOf = model.require_one_of.length > 0 && !model.require_one_of.some((n) => media[n]?.length)
   const valid = (!model.prompt_required || prompt.trim()) && !promptTooLong && !missing.length && !needsOneOf
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault()
+  async function send(allowDuplicate: boolean) {
     if (!model || submitting || !valid) return
+    speech.stop()
     setSubmitting(true)
     try {
       const g = await api.generate(projectId, {
@@ -143,18 +230,30 @@ export function CreatePanel({ projectId, onCreated }: { projectId: string; onCre
         prompt: prompt.trim() || null,
         params,
         media: Object.fromEntries(Object.entries(media).map(([k, v]) => [k, v.map((a) => a.id)])),
+        allow_duplicate: allowDuplicate,
       }, idemKey.current)
       idemKey.current = newIdempotencyKey()
+      saveDraft(projectId, { mode, modelId: model.id, prompt, params, media, idemKey: idemKey.current })
       onCreated(g)
       if (g.status === 'rejected') toast.error(g.error ?? 'Higgsfield rejected the request')
       else if (g.status === 'submission_unknown') toast.warning('Submission outcome unknown — not retried automatically')
       else toast.success('Queued on Higgsfield')
     } catch (err) {
-      if (err instanceof ApiError) idemKey.current = newIdempotencyKey()
-      toast.error((err as Error).message)
+      const detail = err instanceof ApiError ? (err.detail as Partial<Duplicate> & { code?: string }) : null
+      if (detail?.code === 'duplicate' && detail.generation_id) {
+        setDuplicate(detail as Duplicate)
+      } else {
+        if (err instanceof ApiError) idemKey.current = newIdempotencyKey()
+        toast.error((err as Error).message)
+      }
     } finally {
       setSubmitting(false)
     }
+  }
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault()
+    send(false)
   }
 
   return (
@@ -220,8 +319,36 @@ export function CreatePanel({ projectId, onCreated }: { projectId: string; onCre
                 {prompt.length}/{model.prompt_max}
               </span>
             </div>
-            <Textarea id="prompt" rows={4} className="resize-none" placeholder={PLACEHOLDER[mode]} value={prompt}
-              onChange={(e) => setPrompt(e.target.value)} />
+            <div className="relative">
+              <Textarea id="prompt" rows={4} className={cn('resize-none pb-11', speech.listening && 'border-red-400/60')}
+                placeholder={PLACEHOLDER[mode]} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+              {speech.supported && (
+                <div className="absolute right-2 bottom-2 left-2 flex items-center justify-end gap-1.5">
+                  {speech.listening && (
+                    <span className="mr-auto flex items-center gap-1.5 text-xs text-red-300">
+                      <span className="size-2 animate-pulse rounded-full bg-red-400" /> Listening… speak your prompt
+                    </span>
+                  )}
+                  <Select value={lang} onValueChange={(v) => {
+                    setLang(v)
+                    try { localStorage.setItem('vs:speech-lang', v) } catch { /* ignore */ }
+                  }}>
+                    <SelectTrigger size="sm" className="h-7 w-auto gap-1 border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none" aria-label="Dictation language">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {!SPEECH_LANGS.some((l) => l.code === lang) && <SelectItem value={lang}>{lang}</SelectItem>}
+                      {SPEECH_LANGS.map((l) => <SelectItem key={l.code} value={l.code}>{l.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" size="sm" variant={speech.listening ? 'destructive' : 'secondary'}
+                    title={speech.listening ? 'Stop dictation' : 'Dictate your prompt (free browser speech recognition)'}
+                    onClick={() => (speech.listening ? speech.stop() : speech.start(prompt, lang))}>
+                    {speech.listening ? <><Square className="fill-current" /> Stop</> : <><Mic /> Speak</>}
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
 
           <ParamFields model={model} params={params} setParam={(k, v) => setParams((p) => ({ ...p, [k]: v }))} />
@@ -238,6 +365,24 @@ export function CreatePanel({ projectId, onCreated }: { projectId: string; onCre
           )}
         </CardFooter>
       </Card>
+
+      <AlertDialog open={!!duplicate} onOpenChange={(v) => !v && setDuplicate(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Already made this video</AlertDialogTitle>
+            <AlertDialogDescription>
+              {duplicate?.message} Generating again will use Higgsfield credits and give a new variation.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep the existing one</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              setDuplicate(null)
+              send(true)
+            }}>Generate again (uses credits)</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {picking && (
         <AssetPicker open={!!picking} onOpenChange={(v) => !v && setPicking(null)} projectId={projectId}

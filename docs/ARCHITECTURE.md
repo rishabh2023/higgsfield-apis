@@ -43,6 +43,7 @@ To add a model, add one `Model(...)` entry in `catalog.py`. The API validation a
 
 ```
 GET    /api/models                              catalog (modes + model specs)
+GET    /api/stats                               counts, disk use, ledger size, last backup
 GET|PUT|DELETE /api/settings/api-key
 GET|POST       /api/projects                    GET|PATCH|DELETE /api/projects/{id}
 GET|POST       /api/projects/{id}/assets        multipart upload; ?scope=library|all
@@ -60,6 +61,12 @@ POST           /api/webhooks/higgsfield/{id}/{token}
 |---|---|
 | **Output durability** | Higgsfield keeps outputs for "at least 7 days". On `completed`, an asset row is created and the MP4 is streamed to disk in the background (retried, and resumed on restart). The UI plays `/api/assets/{id}/file` and falls back to the CDN URL until the copy exists |
 | **Media as model input** | Inputs must be public URLs. `ensure_remote_url` reuses an asset's remote URL if it's under 6 days old **and** still responds to a 1-byte Range GET. Otherwise it re-uploads the local file through the SDK's presigned upload (`retention=temporary`). This is how edit and extend keep working on old videos |
+| **Ledger (durability)** | SQLite triggers record every change to workspaces, credentials, projects, assets and generations into `_changes` inside the same transaction. After commit it's appended with fsync to `data/ledger.jsonl` (one JSON row per line; poll-only bookkeeping isn't logged). On startup a DB that fails `PRAGMA quick_check` is quarantined, and a missing DB is rebuilt by replaying the ledger (`app/ledger.py`). The first run on an existing DB writes a baseline. `python -m app.recover` does the same by hand. The encrypted API key is included, so it's as protected as in the DB |
+| **Backups** | `sqlite3.backup` to `data/backups/app-YYYY-MM-DD.db` once a day (checked hourly by the poller), keeping 7 |
+| **Output files** | `data/media/<ws>/outputs/<generation_id>.mp4` plus a `.json` sidecar (prompt, model, params, request ID). Uploads go in `data/media/<ws>/uploads/`. If the CDN link has expired, the download asks for a fresh URL via `GET /requests/{id}/status` (free), never a regeneration |
+| **Spend guard** | `fingerprint = sha256(model, prompt, params, media ids)`. An identical request that's active or completed returns `409 {code: duplicate}` unless `allow_duplicate: true`. Failed or rejected attempts don't block a retry |
+| **Draft persistence** | The Create form, including its pending `Idempotency-Key`, is kept in `localStorage` per project, so a refresh mid-submit replays the same key instead of paying again |
+| **Voice prompt** | Browser Web Speech API (`webkitSpeechRecognition`), free and keyless (Google in Chrome and Edge). `frontend/src/lib/use-speech.ts` |
 | **Uploads** | The type is identified from magic bytes (the extension is ignored) and must be one Higgsfield accepts: jpeg/png/webp/gif, wav, mp4. `.mov` is rejected with a hint. Limits are 30/50/200 MB |
 | **Submission order** | Validate spec → check asset ownership and kind → insert `submitting` row → resolve media URLs (a failure here means `rejected`, nothing sent) → submit with no retry |
 | Credentials | Fernet-encrypted `key_id:secret` per workspace. Only a hint is returned. Verified with a free status lookup |

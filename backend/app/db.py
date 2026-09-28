@@ -1,12 +1,17 @@
 """SQLite persistence. Every generation row is owned by exactly one workspace."""
 
+import logging
 import sqlite3
 import threading
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Iterator
 
+from app import ledger
 from app.config import get_settings
+
+log = logging.getLogger("app.db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS workspaces (
@@ -88,19 +93,67 @@ _lock = threading.RLock()
 _conn: sqlite3.Connection | None = None
 
 
+def _prepare(conn: sqlite3.Connection) -> None:
+    """Schema + migrations (no ledger triggers). Also used when rebuilding from the ledger."""
+    conn.executescript(SCHEMA)
+    _migrate(conn)
+
+
+def _healthy(path: Path) -> bool:
+    try:
+        c = sqlite3.connect(path)
+        try:
+            return c.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+        finally:
+            c.close()
+    except sqlite3.DatabaseError:
+        return False
+
+
+def _has_ledger(path: Path) -> bool:
+    lp = ledger.path_for(path)
+    return lp.exists() and lp.stat().st_size > 0
+
+
 def connect() -> sqlite3.Connection:
     global _conn
     with _lock:
         if _conn is None:
             path = get_settings().database_path
             path.parent.mkdir(parents=True, exist_ok=True)
+            # Self-heal: a corrupt or missing DB is rebuilt from the text ledger.
+            if path.exists() and not _healthy(path):
+                moved = ledger.quarantine(path, "corrupt")
+                log.error("database failed integrity check; moved to %s", moved.name)
+            if not path.exists() and _has_ledger(path):
+                counts = ledger.rebuild(path, _prepare)
+                log.warning("rebuilt database from ledger: %s", counts)
             _conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
             _conn.row_factory = sqlite3.Row
             _conn.execute("PRAGMA journal_mode=WAL")
+            _conn.execute("PRAGMA synchronous=FULL")
             _conn.execute("PRAGMA foreign_keys=ON")
-            _conn.executescript(SCHEMA)
-            _migrate(_conn)
+            _prepare(_conn)
+            _conn.executescript(ledger.trigger_sql())
+            lp = ledger.path_for(path)
+            if not _has_ledger(path):
+                n = ledger.baseline(_conn, lp)
+                log.info("started ledger %s with %d existing rows", lp.name, n)
+            else:
+                ledger.drain(_conn, lp)  # anything captured but not written before a crash
         return _conn
+
+
+def _drain() -> None:
+    try:
+        ledger.drain(connect(), ledger.path_for(get_settings().database_path))
+    except Exception:  # never fail a user request over the ledger; rows stay queued in _changes
+        log.exception("could not write ledger; will retry on next change")
+
+
+def backup_now() -> Path | None:
+    with _lock:
+        return ledger.backup(connect(), get_settings().database_path)
 
 
 # Columns added after the first release; ALTERed in on existing databases.
@@ -111,6 +164,7 @@ _GENERATION_COLUMNS = {
     "params_json": "TEXT",
     "media_json": "TEXT NOT NULL DEFAULT '{}'",
     "output_asset_id": "TEXT",
+    "fingerprint": "TEXT",
 }
 
 
@@ -141,6 +195,7 @@ def tx() -> Iterator[sqlite3.Connection]:
             conn.execute("ROLLBACK")
             raise
         conn.execute("COMMIT")
+        _drain()
 
 
 def fetch_one(sql: str, params: tuple = ()) -> dict[str, Any] | None:

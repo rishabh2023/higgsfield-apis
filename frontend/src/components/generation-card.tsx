@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   AlertTriangle, Ban, BookmarkCheck, BookmarkPlus, Download, FastForward, Images, Loader2, MoreHorizontal,
-  RefreshCw, Trash2, Wand2, X,
+  RefreshCw, Shuffle, Trash2, Wand2, X,
 } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
@@ -162,8 +162,16 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
             <RefreshCw className={cn(busy && 'animate-spin')} /> Check again
           </Button>
         )}
+        {['failed', 'nsfw', 'rejected', 'canceled'].includes(g.status) && (
+          <Button size="sm" variant="outline" onClick={() => studio({ from: g.id })}>
+            <Shuffle /> Try another model
+          </Button>
+        )}
         {out && g.status === 'completed' && (
           <>
+            <Button size="sm" asChild title="Download the MP4 to your computer">
+              <a href={`${out.url}?download=1`} download><Download /> Download</a>
+            </Button>
             <Button size="sm" variant="outline" onClick={() => studio({ mode: 'edit', source: out.id })}>
               <Wand2 /> Edit
             </Button>
@@ -189,12 +197,12 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
                   }, out.in_library ? 'Removed from references' : 'Added to references')}>
                     {out.in_library ? <><BookmarkCheck /> Remove from references</> : <><BookmarkPlus /> Add to references</>}
                   </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <a href={`${out.url}?download=1`} download><Download /> Download</a>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
                 </>
               )}
+              <DropdownMenuItem onClick={() => studio({ from: g.id })}>
+                <Shuffle /> Try another model
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem variant="destructive" onClick={() => act(async () => {
                 await api.removeGeneration(g.id)
                 onRemove(g.id)

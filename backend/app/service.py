@@ -12,6 +12,7 @@ Local job statuses:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import random
@@ -199,6 +200,26 @@ async def create_generation(workspace_id: str, project_id: str, body: CreateGene
         raise HTTPException(422, str(err))
     assets = _check_media(workspace_id, model, media_ids)
 
+    # Spend guard: the exact same request (model + prompt + settings + files) already
+    # made or running? Ask before paying for it again.
+    fingerprint = hashlib.sha256(json.dumps(
+        {"model": model.id, "prompt": prompt, "params": params, "media": media_ids}, sort_keys=True,
+    ).encode()).hexdigest()
+    if not body.allow_duplicate:
+        dup = db.fetch_one(
+            "SELECT id, status FROM generations WHERE workspace_id = ? AND fingerprint = ? "
+            "AND status IN ('submitting','queued','in_progress','completed') ORDER BY created_at DESC LIMIT 1",
+            (workspace_id, fingerprint),
+        )
+        if dup:
+            raise HTTPException(409, {
+                "code": "duplicate",
+                "generation_id": dup["id"],
+                "status": dup["status"],
+                "message": "You already generated this exact video with the same prompt, settings and files."
+                if dup["status"] == "completed" else "This exact video is already being generated.",
+            })
+
     api_key = get_api_key(workspace_id)
     if not api_key:
         raise HTTPException(status_code=400, detail="Save your Higgsfield API key in Settings before generating.")
@@ -211,10 +232,10 @@ async def create_generation(workspace_id: str, project_id: str, body: CreateGene
         with db.tx() as conn:
             conn.execute(
                 """INSERT INTO generations (id, workspace_id, project_id, idempotency_key, model, mode, prompt,
-                       params_json, media_json, arguments_json, status, webhook_token, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 'submitting', ?, ?, ?)""",
+                       params_json, media_json, arguments_json, status, webhook_token, fingerprint, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 'submitting', ?, ?, ?, ?)""",
                 (generation_id, workspace_id, project_id, idempotency_key, model.id, model.mode, prompt,
-                 json.dumps(params), json.dumps(media_ids), token, now, now),
+                 json.dumps(params), json.dumps(media_ids), token, fingerprint, now, now),
             )
             conn.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (now, project_id))
     except sqlite3.IntegrityError:
@@ -397,3 +418,30 @@ def recover_orphaned_submissions() -> int:
             (UNKNOWN_MSG.format(detail="server restarted mid-submission"), db.now()),
         )
         return cur.rowcount
+
+
+def stats(workspace_id: str) -> dict[str, Any]:
+    settings = get_settings()
+    data_dir = settings.database_path.parent
+    by_status = {r["status"]: r["n"] for r in db.fetch_all(
+        "SELECT status, COUNT(*) AS n FROM generations WHERE workspace_id = ? GROUP BY status", (workspace_id,))}
+    by_model = {r["model"]: r["n"] for r in db.fetch_all(
+        "SELECT model, COUNT(*) AS n FROM generations WHERE workspace_id = ? AND status = 'completed' GROUP BY model",
+        (workspace_id,))}
+    storage = db.fetch_one(
+        "SELECT COUNT(*) AS files, COALESCE(SUM(size_bytes), 0) AS bytes FROM assets "
+        "WHERE workspace_id = ? AND local_path IS NOT NULL", (workspace_id,)) or {}
+    projects_n = db.fetch_one("SELECT COUNT(*) AS n FROM projects WHERE workspace_id = ?", (workspace_id,)) or {}
+    ledger_file = data_dir / "ledger.jsonl"
+    backups = sorted((data_dir / "backups").glob("app-*.db")) if (data_dir / "backups").exists() else []
+    return {
+        "projects": projects_n.get("n", 0),
+        "generations": sum(by_status.values()),
+        "by_status": by_status,
+        "completed_by_model": by_model,
+        "saved_files": storage.get("files", 0),
+        "saved_bytes": storage.get("bytes", 0),
+        "data_dir": str(data_dir.resolve()),
+        "ledger": {"file": ledger_file.name, "bytes": ledger_file.stat().st_size if ledger_file.exists() else 0},
+        "last_backup": backups[-1].name if backups else None,
+    }

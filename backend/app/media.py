@@ -10,15 +10,17 @@ Why local copies:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import mimetypes
+import re
 import uuid
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 
-from app import db, higgsfield
+from app import crypto, db, higgsfield
 from app.config import get_settings
 from app.higgsfield import HFError
 
@@ -42,8 +44,9 @@ def bind_loop(loop: asyncio.AbstractEventLoop) -> None:
     _loop = loop
 
 
-def media_dir(workspace_id: str) -> Path:
-    d = get_settings().database_path.parent / "media" / workspace_id
+def media_dir(workspace_id: str, sub: str = "uploads") -> Path:
+    """data/media/<workspace>/uploads/<asset>.<ext>  |  data/media/<workspace>/outputs/<generation>.mp4"""
+    d = get_settings().database_path.parent / "media" / workspace_id / sub
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -78,6 +81,14 @@ def to_public(a: dict[str, Any]) -> dict[str, Any]:
         "size_bytes": a["size_bytes"], "in_library": bool(a["in_library"]), "status": a["status"],
         "error": a["error"], "created_at": a["created_at"], "url": asset_url(a["id"]),
     }
+
+
+def download_name(a: dict[str, Any]) -> str:
+    """Readable, filesystem-safe name: 'sunlit-coastal-road-3f2a9c1b.mp4'."""
+    stem = Path(a["name"]).stem if Path(a["name"]).suffix else a["name"]
+    slug = re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")[:60] or "video"
+    ext = Path(a["name"]).suffix if a["source"] == "upload" and Path(a["name"]).suffix else EXT.get(a["content_type"], "")
+    return f"{slug}-{a['id'][:8]}{ext}"
 
 
 def get_owned(workspace_id: str, asset_id: str) -> dict[str, Any]:
@@ -205,29 +216,76 @@ def _spawn(asset_id: str) -> None:
     task.add_done_callback(_tasks.discard)
 
 
+def _write_sidecar(dest: Path, a: dict[str, Any]) -> None:
+    """Human-readable info next to each saved video, so files make sense without the app."""
+    g = db.fetch_one("SELECT * FROM generations WHERE id = ?", (a["generation_id"],)) or {}
+    p = db.fetch_one("SELECT name FROM projects WHERE id = ?", (a["project_id"],)) or {}
+    info = {
+        "file": dest.name,
+        "project": p.get("name"),
+        "generation_id": a["generation_id"],
+        "higgsfield_request_id": g.get("hf_request_id"),
+        "model": g.get("model"),
+        "mode": g.get("mode"),
+        "prompt": g.get("prompt"),
+        "params": json.loads(g.get("params_json") or "{}"),
+        "created_at": g.get("created_at"),
+        "finished_at": g.get("finished_at"),
+        "source_url": a["remote_url"],
+    }
+    dest.with_suffix(".json").write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+async def _fresh_output_url(a: dict[str, Any]) -> str | None:
+    """Ask Higgsfield again for the output URL by request ID (a free status call, not a regeneration)."""
+    g = db.fetch_one("SELECT hf_request_id, workspace_id FROM generations WHERE id = ?", (a["generation_id"],))
+    cred = g and db.fetch_one("SELECT encrypted_key FROM credentials WHERE workspace_id = ?", (g["workspace_id"],))
+    api_key = crypto.decrypt(cred["encrypted_key"]) if cred else None
+    if not (g and g["hf_request_id"] and api_key):
+        return None
+    try:
+        body = await higgsfield.gateway.result(api_key, g["hf_request_id"])
+    except HFError:
+        return None
+    url = (body.get("video") or {}).get("url") if isinstance(body.get("video"), dict) else None
+    return url if url and url != a["remote_url"] else None
+
+
 async def download_output(asset_id: str, attempts: int = 4) -> None:
     a = db.fetch_one("SELECT * FROM assets WHERE id = ?", (asset_id,))
     if not a or a["status"] == "ready" or not a["remote_url"]:
         return
     ext = EXT.get(a["content_type"], ".mp4")
-    dest = media_dir(a["workspace_id"]) / f"{asset_id}{ext}"
+    key = a["generation_id"] or asset_id
+    dest = media_dir(a["workspace_id"], "outputs") / f"{key}{ext}"
     delay = 2.0
+    refreshed = False
     for attempt in range(1, attempts + 1):
         try:
             ctype, size = await higgsfield.gateway.download(a["remote_url"], dest, OUTPUT_MAX_BYTES)
-            if ctype.startswith("video/"):
-                a_ct = ctype
-            else:
-                a_ct = a["content_type"]
+            a_ct = ctype if ctype.startswith("video/") else a["content_type"]
             with db.tx() as conn:
                 conn.execute(
                     "UPDATE assets SET local_path = ?, size_bytes = ?, content_type = ?, status = 'ready', error = NULL WHERE id = ?",
                     (str(dest), size, a_ct, asset_id),
                 )
-            log.info("saved output %s (%d bytes)", asset_id, size)
+            try:
+                _write_sidecar(dest, a)
+            except OSError:
+                log.warning("could not write sidecar for %s", dest.name)
+            log.info("saved output %s (%d bytes)", dest.name, size)
             return
         except HFError as err:
             log.warning("download %s attempt %d failed: %s", asset_id, attempt, err.message)
+            if err.kind != "transient" and not refreshed:
+                refreshed = True
+                fresh = await _fresh_output_url(a)
+                if fresh:
+                    with db.tx() as conn:
+                        conn.execute("UPDATE assets SET remote_url = ?, remote_url_at = ? WHERE id = ?",
+                                     (fresh, db.now(), asset_id))
+                    a = {**a, "remote_url": fresh}
+                    continue
             if err.kind != "transient" or attempt == attempts:
                 with db.tx() as conn:
                     conn.execute("UPDATE assets SET status = 'download_failed', error = ? WHERE id = ?",

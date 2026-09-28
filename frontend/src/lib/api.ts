@@ -106,13 +106,28 @@ export type CreateGenerationBody = {
   prompt: string | null
   params: Record<string, unknown>
   media: Record<string, string[]>
+  allow_duplicate?: boolean
+}
+
+export type Stats = {
+  projects: number
+  generations: number
+  by_status: Record<string, number>
+  completed_by_model: Record<string, number>
+  saved_files: number
+  saved_bytes: number
+  data_dir: string
+  ledger: { file: string; bytes: number }
+  last_backup: string | null
 }
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  detail: unknown
+  constructor(status: number, message: string, detail?: unknown) {
     super(message)
     this.status = status
+    this.detail = detail
   }
 }
 
@@ -135,8 +150,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       ? detail.map((d: { loc?: string[]; msg: string }) => `${d.loc?.slice(-1)[0] ?? ''}: ${d.msg}`).join('; ')
       : typeof detail === 'string'
         ? detail
-        : `Request failed (${res.status})`
-    throw new ApiError(res.status, msg)
+        : typeof detail?.message === 'string'
+          ? detail.message
+          : `Request failed (${res.status})`
+    throw new ApiError(res.status, msg, detail)
   }
   return body as T
 }
@@ -167,6 +184,8 @@ export const api = {
   deleteAsset: (id: string) => request<void>(`/assets/${id}`, { method: 'DELETE' }),
   retryDownload: (id: string) => request<Asset>(`/assets/${id}/retry-download`, { method: 'POST' }),
 
+  stats: () => request<Stats>('/stats'),
+  generation: (id: string) => request<Generation>(`/generations/${id}`),
   generations: (projectId: string) => request<Generation[]>(`/projects/${projectId}/generations`),
   generate: (projectId: string, body: CreateGenerationBody, idempotencyKey: string) =>
     request<Generation>(`/projects/${projectId}/generations`, { ...json('POST', body), headers: { 'Idempotency-Key': idempotencyKey } }),

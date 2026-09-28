@@ -6,7 +6,9 @@ runs on your own computer, using Seedance 2.0 / 2.5 and Kling O3 through the [Hi
 - 📁 **Projects** keep each campaign's videos and reference files together
 - 🖼 **References library**: upload images, MP4 clips or WAV audio and reuse them in any generation
 - ✂️ **Edit / Extend** any video you made, or use it as a reference for the next one
-- 💾 **Every video is saved to your computer**, because Higgsfield deletes outputs after about 7 days
+- 💾 **Every video is saved to your computer**, because Higgsfield deletes outputs after about 7 days. Download with one click
+- 🎤 **Speak your prompt** with free built-in browser speech recognition
+- 🛡 **No lost work, no double charges**: a plain-text ledger and daily backups let the app rebuild itself, and it asks before re-paying for an identical video
 
 You bring your own Higgsfield API key. You paste it into the app once, and the app keeps it
 safe and uses it for every video after that.

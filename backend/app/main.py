@@ -48,6 +48,11 @@ def health() -> dict:
     return {"ok": True}
 
 
+@app.get("/api/stats")
+def get_stats(workspace_id: str = Depends(current_workspace)):
+    return service.stats(workspace_id)
+
+
 # ------------------------------------------------------------------ models
 
 
@@ -145,7 +150,7 @@ async def retry_asset_download(asset_id: str, workspace_id: str = Depends(curren
 def asset_file(asset_id: str, download: bool = False, workspace_id: str = Depends(current_workspace)):
     a = media.get_owned(workspace_id, asset_id)
     if a["local_path"] and Path(a["local_path"]).exists():
-        filename = a["name"] if Path(a["name"]).suffix else a["name"] + (media.EXT.get(a["content_type"]) or "")
+        filename = media.download_name(a)
         return FileResponse(
             a["local_path"], media_type=a["content_type"],
             filename=filename if download else None,

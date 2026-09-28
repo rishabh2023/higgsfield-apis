@@ -12,6 +12,8 @@ class CreateGeneration(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     # media slot name -> asset ids (from the project's library or earlier outputs)
     media: dict[str, list[str]] = Field(default_factory=dict)
+    # Set after the user confirms they really want to pay for an identical generation again.
+    allow_duplicate: bool = False
 
 
 class ProjectIn(BaseModel):
