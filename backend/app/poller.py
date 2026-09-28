@@ -6,7 +6,7 @@ State lives in SQLite (next_poll_at / poll_delay), so a restart resumes polling.
 import asyncio
 import logging
 
-from app import service
+from app import media, service
 
 log = logging.getLogger("app.poller")
 
@@ -22,6 +22,8 @@ class Poller:
         recovered = service.recover_orphaned_submissions()
         if recovered:
             log.warning("marked %d orphaned submissions as submission_unknown", recovered)
+        media.bind_loop(asyncio.get_running_loop())
+        media.resume_downloads()
         self._task = asyncio.create_task(self._run(), name="higgsfield-poller")
 
     async def stop(self) -> None:

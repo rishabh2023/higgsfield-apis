@@ -1,53 +1,80 @@
 # User guide
 
-## Getting your Higgsfield API key
+The app has two pages in the left sidebar: **Projects** (where you make videos) and **Settings**
+(your API key, storage info, and the list of models).
 
-1. Go to the [Higgsfield Console](https://console.higgsfield.ai) and log in.
-2. Create an API key. You get two values: a **Key ID** and a **Secret**. Copy both.
-3. In the app, paste them into the **Higgsfield API key** box and click **Verify & save**.
+## 1. Connect Higgsfield (once)
 
-The app checks the key with Higgsfield before saving it. The check is free and doesn't make a video.
-If you see *"Higgsfield rejected these credentials"*, one of the two values was copied incorrectly.
+1. Go to the [Higgsfield Console](https://console.higgsfield.ai), log in, and create an API key.
+   You get a **Key ID** and a **Secret**.
+2. Open **Settings** in the app, paste both, and click **Verify & save**.
 
-- **Replace:** saves a different key.
-- **🗑 (trash icon):** removes the saved key from this computer.
+The key is checked with a free lookup (it doesn't make a video) and stored encrypted on your computer.
+The dot at the bottom-left of the sidebar turns green when the key is ready.
 
-## Making a video
+## 2. Projects
 
-| Option | What it does | Choices |
+A project is a folder for one idea or campaign. It has three tabs:
+
+| Tab | What's there |
+|---|---|
+| **Create** | The form for making a new video, with your 4 most recent videos beside it |
+| **Videos** | Every video in the project, with its status |
+| **References** | Your uploaded images, MP4 clips and WAV audio, plus any generated videos you've saved as references |
+
+Rename or delete a project with the **⋯** button at the top right. Deleting it removes its files from your computer.
+
+## 3. The five ways to make a video
+
+| Mode | You give it | Models |
 |---|---|---|
-| **Prompt** | Describe the scene: subject, action, camera, lighting, mood | Up to 5000 characters |
-| **Duration** | Length of the video | 4–15 seconds (default 5) |
-| **Resolution** | Picture quality. Higher looks better, takes longer, and may cost more | 480p, 720p, 1080p, 4k |
-| **Aspect ratio** | Shape of the video | 16:9 (YouTube), 9:16 (Reels/TikTok), 1:1 (square), 4:3, 3:4, 21:9 (cinematic) |
-| **Generate audio** | Adds sound and ambience | On / Off |
+| **Text** | A prompt | Seedance 2.0 (up to 15s, up to 4K), Seedance 2.5 (up to 30s, 720p) |
+| **Image** | A start image, an optional end image, and an optional prompt | Seedance 2.0 |
+| **References** | Reference images, videos and/or audio, plus a prompt describing how to use them | Seedance 2.0, Seedance 2.5 |
+| **Edit** | A video plus a prompt describing the change ("make it snow") | Seedance 2.5 Edit, Kling O3 Edit (3–15.5s source) |
+| **Extend** | A video plus a prompt describing what happens next | Seedance 2.5 Extend (4–30s more) |
 
-**Prompt tip:** describe it like a film shot, for example: *"Slow drone shot over a misty pine forest at
-sunrise, golden light, cinematic."*
+The form changes to match the model you pick. It only shows options that model supports and tells you its
+limits. The **↗** icon next to the model opens its official documentation.
 
-Click **Generate video** once. Clicking it again for the same video won't create a duplicate.
+### Adding files to a generation
+Click **Choose image / video / audio** in the form. You can pick from the project's References or its
+generated videos, or drop a new file right there.
 
-## What the statuses mean
+Accepted files: **JPG, PNG, WEBP, GIF** images (≤30 MB), **MP4** video (≤200 MB), **WAV** audio (≤50 MB).
+Higgsfield doesn't accept `.mov`, so export as MP4 first.
+
+## 4. Editing a video you made
+
+Every finished video has these buttons:
+
+- **Edit**: opens Create in Edit mode with this video already filled in. Write what should change.
+- **Extend**: opens Create in Extend mode to continue the video.
+- **⋯ → Use as reference**: starts a References-to-video generation that uses this clip.
+- **⋯ → Add to references**: saves the clip to the project's References tab for later.
+- **⋯ → Download**: saves the MP4.
+
+## 5. What the statuses mean
 
 | Status | Meaning | What to do |
 |---|---|---|
 | **Submitting / Queued** | Sent to Higgsfield and waiting its turn | Wait. You can **Cancel** while it's queued |
 | **Generating** | Higgsfield is making the video | Wait, usually a few minutes |
-| **Completed** | Done 🎉 | Press play, or click **Open** to download |
+| **Completed** | Done 🎉 | Play it, edit it, extend it or download it |
 | **Failed** | Higgsfield couldn't make it | Try again. You are not charged |
-| **Moderated** | Blocked by the content filter | Change the prompt. You are not charged |
-| **Rejected** | Higgsfield refused the request (for example not enough credits, or too many videos running at once) | Read the message on the card and fix it |
-| **Outcome unknown** | The connection dropped while sending, so we can't tell whether Higgsfield received it | Check your [Higgsfield Console](https://console.higgsfield.ai) before trying again. The app **never** resends on its own, so you won't be charged twice |
+| **Moderated** | Blocked by the content filter | Change the prompt or files. You are not charged |
+| **Rejected** | Refused before starting (for example not enough credits, too many videos running at once, or a file couldn't be sent) | Read the message on the card |
+| **Outcome unknown** | The connection dropped while sending, so we can't tell whether Higgsfield received it | Check the [Higgsfield Console](https://console.higgsfield.ai) before trying again. The app **never** resends on its own, so you won't be charged twice |
 | **Timed out** | Waited 45 minutes with no answer | Click **Check again** |
-| **Stalled** | Status checks stopped, usually because the key was changed or removed | Save a working key, then click **Check again** |
-| **Canceled** | You canceled it before it started | — |
+| **Stalled** | Status checks stopped (the key was changed or removed) | Save a working key in Settings, then click **Check again** |
 
-Videos keep updating even if you close the tab. Everything is saved, so it's all still there when you come back.
-
-**Download your videos.** Higgsfield keeps video links for at least 7 days, so save the ones you want to keep.
+"Saving a copy to this computer…" under a video means it's still downloading. Until that finishes, it plays
+from Higgsfield.
 
 ## Good to know
 
-- Your saved key and history belong to **this browser**. Another browser, or a private window, starts
-  fresh, and you'd enter the key again.
-- **Remove from history** (trash icon on a card) only hides it here. It doesn't affect Higgsfield.
+- **Your videos are kept.** Higgsfield deletes outputs after about 7 days, so the app downloads every finished
+  video to `backend/data/media/`. When an old video or reference is used again, the app re-uploads it for you.
+- **Costs:** each generation uses credits from your Higgsfield account. The price depends on the model,
+  length and resolution.
+- Your projects, key and files belong to **this browser**. Another browser, or a private window, starts fresh.

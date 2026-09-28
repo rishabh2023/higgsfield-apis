@@ -30,8 +30,24 @@ The encryption file `backend/data/secret.key` was deleted or changed. Click **Re
 ### The page loads but says "Request failed"
 The server part isn't running. Stop everything (Ctrl + C) and run `./start.sh` again.
 
+### "QuickTime .mov files aren't accepted"
+Higgsfield only accepts MP4 video. Export or convert the clip to MP4 (for example with QuickTime:
+File, Export As, then 1080p), then upload it again.
+
+### "Couldn't prepare reference files"
+The app couldn't send one of your chosen files to Higgsfield (the network dropped, or the file was removed).
+Nothing was generated and you weren't charged. Just click **Generate** again.
+
+### A video says "Couldn't save a local copy"
+It still plays from Higgsfield. Click **Retry** on the card. After about 7 days Higgsfield deletes its copy,
+so retry before then.
+
+### I updated the app (git pull) and something looks broken
+Stop it with Ctrl + C and run `./start.sh` again. The server part doesn't reload by itself.
+Your projects and videos are kept.
+
 ### Start over completely
-Stop the app, delete the `backend/data` folder (this removes the saved key and history), and run `./start.sh`.
+Stop the app, delete the `backend/data` folder (this removes the saved key, projects and **all saved videos**), and run `./start.sh`.
 
 ---
 

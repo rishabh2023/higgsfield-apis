@@ -15,7 +15,9 @@ Why a wrapper:
 from __future__ import annotations
 
 import hashlib
+import os
 import uuid
+from pathlib import Path
 from collections import OrderedDict
 from dataclasses import dataclass
 from functools import cached_property
@@ -187,5 +189,50 @@ class HiggsfieldGateway:
             return None
         return True
 
+
+    async def upload(self, api_key: str, data: bytes, content_type: str) -> str:
+        """Presigned upload via the SDK (POST /files/generate-upload-url, then PUT). Returns public_url."""
+        _, client = _clients.get(api_key)
+        try:
+            return await client.upload(data, content_type)
+        except Exception as exc:  # noqa: BLE001
+            raise _classify(exc, submitting=False) from exc
+
+    async def url_alive(self, url: str) -> bool:
+        """True if a previously obtained public media URL still serves content."""
+        try:
+            async with httpx.AsyncClient(timeout=15, headers={"User-Agent": APP_USER_AGENT}, follow_redirects=True) as c:
+                r = await c.get(url, headers={"Range": "bytes=0-0"})
+                return r.status_code in (200, 206)
+        except httpx.HTTPError:
+            return False
+
+    async def download(self, url: str, dest: Path, max_bytes: int) -> tuple[str, int]:
+        """Stream a generated output to local storage. Returns (content_type, size)."""
+        if not url.startswith("https://"):
+            raise HFError("rejected", "Refusing to download a non-HTTPS output URL.")
+        tmp = dest.with_suffix(dest.suffix + ".part")
+        size = 0
+        try:
+            async with httpx.AsyncClient(timeout=60, headers={"User-Agent": APP_USER_AGENT}, follow_redirects=True) as c:
+                async with c.stream("GET", url) as r:
+                    r.raise_for_status()
+                    ctype = r.headers.get("content-type", "application/octet-stream").split(";")[0]
+                    with open(tmp, "wb") as fh:
+                        async for chunk in r.aiter_bytes(1 << 20):
+                            size += len(chunk)
+                            if size > max_bytes:
+                                raise HFError("rejected", "Output file is larger than the download limit.")
+                            fh.write(chunk)
+            os.replace(tmp, dest)
+            return ctype, size
+        except httpx.HTTPError as exc:
+            raise HFError("transient", f"Download failed ({type(exc).__name__}).") from exc
+        finally:
+            tmp.unlink(missing_ok=True)
+
+
+# Used for direct (non-SDK) HTTP: fetching outputs and checking media URL liveness.
+APP_USER_AGENT = "higgsfield-video-studio/1.0"
 
 gateway: HiggsfieldGateway = HiggsfieldGateway()

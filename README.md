@@ -1,7 +1,12 @@
 # Higgsfield Video Studio
 
-Type a sentence and get an AI video back. This is a small app that runs on your own computer.
-It uses **Seedance 2.0** through the [Higgsfield](https://higgsfield.ai) API.
+Make AI videos from text, images or reference clips, then **edit** or **extend** them. It all
+runs on your own computer, using Seedance 2.0 / 2.5 and Kling O3 through the [Higgsfield](https://higgsfield.ai) API.
+
+- 📁 **Projects** keep each campaign's videos and reference files together
+- 🖼 **References library**: upload images, MP4 clips or WAV audio and reuse them in any generation
+- ✂️ **Edit / Extend** any video you made, or use it as a reference for the next one
+- 💾 **Every video is saved to your computer**, because Higgsfield deletes outputs after about 7 days
 
 You bring your own Higgsfield API key. You paste it into the app once, and the app keeps it
 safe and uses it for every video after that.
@@ -51,11 +56,11 @@ The first run takes about a minute. After that it starts in seconds. When it's r
 ### Step 3 — Use it
 
 1. Open **http://localhost:5173** in your browser.
-2. Get an API key: log in to the [Higgsfield Console](https://console.higgsfield.ai) and create one.
-   It has two parts, a **Key ID** and a **Secret**.
-3. Paste both into the **Higgsfield API key** box and click **Verify & save**. You only do this once.
-4. Describe your video, pick a length and shape, and click **Generate video**.
-5. Wait a few minutes. The video shows up and plays on its own.
+2. Go to **Settings**. Paste your Higgsfield **Key ID** and **Secret** (create them in the
+   [Higgsfield Console](https://console.higgsfield.ai)) and click **Verify & save**. You only do this once.
+3. Go to **Projects**, then **New project**.
+4. In the **Create** tab, pick a mode (Text, Image, References, Edit or Extend), write a prompt, and click **Generate**.
+5. Wait a few minutes. The video appears and plays on its own. Click **Edit** or **Extend** on it to keep going.
 
 To stop the app, press **Ctrl + C** in the Terminal. To start it again later, run `./start.sh`.
 

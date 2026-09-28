@@ -9,21 +9,89 @@ export type CredentialStatus = {
   warning?: string | null
 }
 
-export type VideoInput = {
-  prompt: string
-  duration: number
-  resolution: '480p' | '720p' | '1080p' | '4k'
-  aspect_ratio: '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9'
-  generate_audio: boolean
+export type ModeId = 'text' | 'image' | 'reference' | 'edit' | 'extend'
+export type MediaKind = 'image' | 'video' | 'audio'
+
+export type Mode = { id: ModeId; name: string; description: string }
+
+export type ParamSpec = {
+  name: string
+  label: string
+  type: 'int' | 'enum' | 'bool'
+  default: number | string | boolean
+  min: number | null
+  max: number | null
+  options: string[] | null
+  help: string | null
 }
+
+export type MediaSlot = {
+  name: string
+  label: string
+  kind: MediaKind
+  multiple: boolean
+  required: boolean
+  max: number
+  help: string | null
+}
+
+export type ModelSpec = {
+  id: string
+  name: string
+  mode: ModeId
+  docs: string
+  prompt_required: boolean
+  prompt_max: number
+  params: ParamSpec[]
+  media: MediaSlot[]
+  require_one_of: string[]
+  notes: string[]
+}
+
+export type Catalog = { modes: Mode[]; models: ModelSpec[] }
+
+export type Project = {
+  id: string
+  name: string
+  description: string
+  created_at: number
+  updated_at: number
+  generations: number
+  active: number
+  references: number
+  cover_url: string | null
+}
+
+export type Asset = {
+  id: string
+  project_id: string
+  kind: MediaKind
+  source: 'upload' | 'generation'
+  generation_id: string | null
+  name: string
+  content_type: string
+  size_bytes: number | null
+  in_library: boolean
+  status: 'ready' | 'downloading' | 'download_failed'
+  error: string | null
+  created_at: number
+  url: string
+}
+
+export type AssetBrief = { id: string; name: string; kind: MediaKind | null; url: string | null }
 
 export type Generation = {
   id: string
+  project_id: string
   model: string
-  input: VideoInput
+  mode: ModeId
+  prompt: string | null
+  params: Record<string, unknown>
+  media: Record<string, AssetBrief[]>
   status: string
   request_id: string | null
-  video_url: string | null
+  remote_video_url: string | null
+  output: Asset | null
   error: string | null
   correlation_id: string | null
   created_at: number
@@ -31,6 +99,13 @@ export type Generation = {
   finished_at: number | null
   is_active: boolean
   can_cancel: boolean
+}
+
+export type CreateGenerationBody = {
+  model: string
+  prompt: string | null
+  params: Record<string, unknown>
+  media: Record<string, string[]>
 }
 
 export class ApiError extends Error {
@@ -42,11 +117,12 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const isForm = init.body instanceof FormData
   const res = await fetch(`/api${path}`, {
     ...init,
     credentials: 'same-origin',
     headers: {
-      'Content-Type': 'application/json',
+      ...(isForm ? {} : { 'Content-Type': 'application/json' }),
       'X-Requested-With': 'video-gen',
       ...(init.headers ?? {}),
     },
@@ -65,23 +141,59 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T
 }
 
+const json = (method: string, data: unknown): RequestInit => ({ method, body: JSON.stringify(data) })
+
 export const api = {
+  catalog: () => request<Catalog>('/models'),
+
   getKey: () => request<CredentialStatus>('/settings/api-key'),
-  saveKey: (key_id: string, key_secret: string) =>
-    request<CredentialStatus>('/settings/api-key', { method: 'PUT', body: JSON.stringify({ key_id, key_secret }) }),
+  saveKey: (key_id: string, key_secret: string) => request<CredentialStatus>('/settings/api-key', json('PUT', { key_id, key_secret })),
   deleteKey: () => request<void>('/settings/api-key', { method: 'DELETE' }),
-  list: () => request<Generation[]>('/generations'),
-  create: (input: VideoInput, idempotencyKey: string) =>
-    request<Generation>('/generations', {
-      method: 'POST',
-      headers: { 'Idempotency-Key': idempotencyKey },
-      body: JSON.stringify({ model: 'bytedance/seedance-2.0/text-to-video', input }),
-    }),
+
+  projects: () => request<Project[]>('/projects'),
+  project: (id: string) => request<Project>(`/projects/${id}`),
+  createProject: (name: string, description: string) => request<Project>('/projects', json('POST', { name, description })),
+  updateProject: (id: string, patch: { name?: string; description?: string }) =>
+    request<Project>(`/projects/${id}`, json('PATCH', patch)),
+  deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
+
+  assets: (projectId: string, scope: 'library' | 'all' = 'all') => request<Asset[]>(`/projects/${projectId}/assets?scope=${scope}`),
+  upload: (projectId: string, file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return request<Asset>(`/projects/${projectId}/assets`, { method: 'POST', body: fd })
+  },
+  updateAsset: (id: string, patch: { name?: string; in_library?: boolean }) => request<Asset>(`/assets/${id}`, json('PATCH', patch)),
+  deleteAsset: (id: string) => request<void>(`/assets/${id}`, { method: 'DELETE' }),
+  retryDownload: (id: string) => request<Asset>(`/assets/${id}/retry-download`, { method: 'POST' }),
+
+  generations: (projectId: string) => request<Generation[]>(`/projects/${projectId}/generations`),
+  generate: (projectId: string, body: CreateGenerationBody, idempotencyKey: string) =>
+    request<Generation>(`/projects/${projectId}/generations`, { ...json('POST', body), headers: { 'Idempotency-Key': idempotencyKey } }),
   cancel: (id: string) => request<Generation>(`/generations/${id}/cancel`, { method: 'POST' }),
   refresh: (id: string) => request<Generation>(`/generations/${id}/refresh`, { method: 'POST' }),
-  remove: (id: string) => request<void>(`/generations/${id}`, { method: 'DELETE' }),
+  removeGeneration: (id: string) => request<void>(`/generations/${id}`, { method: 'DELETE' }),
 }
 
 export function newIdempotencyKey(): string {
   return crypto.randomUUID().replace(/-/g, '')
+}
+
+export function formatBytes(n: number | null): string {
+  if (!n) return ''
+  const units = ['B', 'KB', 'MB', 'GB']
+  let i = 0
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024
+    i++
+  }
+  return `${n.toFixed(i ? 1 : 0)} ${units[i]}`
+}
+
+export function timeAgo(ts: number): string {
+  const s = Math.max(0, Date.now() / 1000 - ts)
+  if (s < 60) return 'just now'
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+  return `${Math.floor(s / 86400)}d ago`
 }

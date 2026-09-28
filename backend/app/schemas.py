@@ -1,40 +1,38 @@
-from typing import Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# Verified 2026-09-28 against
-# https://docs.higgsfield.ai/docs/models/seedance-2/text-to-video.md
-SEEDANCE_2_T2V = "bytedance/seedance-2.0/text-to-video"
-
-Resolution = Literal["480p", "720p", "1080p", "4k"]
-AspectRatio = Literal["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]
-
-
-class SeedanceTextToVideoInput(BaseModel):
-    """Mirrors the model's JSON schema (additionalProperties: false)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    prompt: str = Field(min_length=1, max_length=5000)
-    duration: int = Field(default=5, ge=4, le=15)
-    resolution: Resolution = "720p"
-    aspect_ratio: AspectRatio = "16:9"
-    generate_audio: bool = True
-
-    @field_validator("prompt")
-    @classmethod
-    def _nonblank(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("prompt must not be blank")
-        return v
-
-
 class CreateGeneration(BaseModel):
+    """Validated against the model's spec in app/catalog.py."""
+
     model_config = ConfigDict(extra="forbid")
 
-    model: Literal["bytedance/seedance-2.0/text-to-video"] = SEEDANCE_2_T2V
-    input: SeedanceTextToVideoInput
+    model: str = Field(max_length=200)
+    prompt: str | None = Field(default=None, max_length=10000)
+    params: dict[str, Any] = Field(default_factory=dict)
+    # media slot name -> asset ids (from the project's library or earlier outputs)
+    media: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class ProjectIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=1000)
+
+
+class ProjectPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=1000)
+
+
+class AssetPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    in_library: bool | None = None
 
 
 class SaveApiKey(BaseModel):
@@ -57,19 +55,3 @@ class CredentialStatus(BaseModel):
     key_hint: str | None = None
     verified: bool = False
     usable: bool = False
-
-
-class Generation(BaseModel):
-    id: str
-    model: str
-    input: dict
-    status: str
-    request_id: str | None
-    video_url: str | None
-    error: str | None
-    correlation_id: str | None
-    created_at: float
-    updated_at: float
-    finished_at: float | None
-    is_active: bool
-    can_cancel: bool

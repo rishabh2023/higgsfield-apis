@@ -1,12 +1,20 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Ban, Download, Loader2, RefreshCw, Trash2, X } from 'lucide-react'
+import {
+  AlertTriangle, Ban, BookmarkCheck, BookmarkPlus, Download, FastForward, Images, Loader2, MoreHorizontal,
+  RefreshCw, Trash2, Wand2, X,
+} from 'lucide-react'
+import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 
+import { MediaThumb } from '@/components/media'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { api, type Generation } from '@/lib/api'
+import { useApp } from '@/lib/app-context'
 import { cn } from '@/lib/utils'
 
 const STATUS: Record<string, { label: string; tone: string }> = {
@@ -24,12 +32,8 @@ const STATUS: Record<string, { label: string; tone: string }> = {
 }
 
 const ASPECT_CLASS: Record<string, string> = {
-  '16:9': 'aspect-video',
-  '4:3': 'aspect-[4/3]',
-  '1:1': 'aspect-square',
-  '3:4': 'aspect-[3/4]',
-  '9:16': 'aspect-[9/16] max-h-[420px] mx-auto',
-  '21:9': 'aspect-[21/9]',
+  '16:9': 'aspect-video', '4:3': 'aspect-[4/3]', '1:1': 'aspect-square',
+  '3:4': 'aspect-[3/4]', '9:16': 'aspect-[9/16] max-h-[440px] mx-auto', '21:9': 'aspect-[21/9]',
 }
 
 function useElapsed(since: number, active: boolean) {
@@ -50,16 +54,23 @@ type Props = {
 }
 
 export function GenerationCard({ g, onUpdate, onRemove }: Props) {
+  const { catalog } = useApp()
+  const navigate = useNavigate()
   const [busy, setBusy] = useState(false)
   const elapsed = useElapsed(g.created_at, g.is_active)
   const st = STATUS[g.status] ?? { label: g.status, tone: 'bg-muted' }
+  const model = catalog?.models.find((m) => m.id === g.model)
+  const mode = catalog?.modes.find((m) => m.id === g.mode)
   const refreshable = ['timed_out', 'stalled'].includes(g.status)
+  const out = g.output
+  const videoSrc = out?.url ?? g.remote_video_url
+  const aspect = (g.params.aspect_ratio as string) ?? '16:9'
+  const inputs = Object.values(g.media).flat()
 
-  async function act(fn: () => Promise<Generation | void>, ok?: string) {
+  async function act(fn: () => Promise<unknown>, ok?: string) {
     setBusy(true)
     try {
-      const res = await fn()
-      if (res) onUpdate(res)
+      await fn()
       if (ok) toast.success(ok)
     } catch (err) {
       toast.error((err as Error).message)
@@ -68,11 +79,14 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
     }
   }
 
+  const studio = (params: Record<string, string>) =>
+    navigate(`/projects/${g.project_id}?${new URLSearchParams({ tab: 'create', ...params })}`)
+
   return (
     <Card className="gap-0 overflow-hidden py-0">
-      <div className={cn('relative w-full bg-black/40', ASPECT_CLASS[g.input.aspect_ratio] ?? 'aspect-video')}>
-        {g.status === 'completed' && g.video_url ? (
-          <video src={g.video_url} controls playsInline loop className="size-full object-contain" />
+      <div className={cn('relative w-full bg-black/40', g.status === 'completed' && videoSrc ? ASPECT_CLASS[aspect] ?? 'aspect-video' : 'aspect-video')}>
+        {g.status === 'completed' && videoSrc ? (
+          <video src={videoSrc} controls playsInline loop preload="metadata" className="size-full object-contain" />
         ) : g.is_active ? (
           <div className="absolute inset-0 grid place-items-center overflow-hidden">
             <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-violet-500/10 via-transparent to-sky-500/10" />
@@ -93,58 +107,109 @@ export function GenerationCard({ g, onUpdate, onRemove }: Props) {
       </div>
 
       <CardContent className="grid gap-2 pt-4">
-        <p className="line-clamp-2 text-sm leading-relaxed">{g.input.prompt}</p>
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge className={cn('border-0', st.tone)}>{st.label}</Badge>
-          <Badge variant="outline">{g.input.duration}s</Badge>
-          <Badge variant="outline">{g.input.resolution}</Badge>
-          <Badge variant="outline">{g.input.aspect_ratio}</Badge>
-          {g.input.generate_audio && <Badge variant="outline">audio</Badge>}
+          <Badge variant="outline">{mode?.name ?? g.mode}</Badge>
+          <span className="text-xs text-muted-foreground">{model?.name ?? g.model}</span>
         </div>
-        {(g.request_id || g.correlation_id) && (
-          <p className="truncate font-mono text-[11px] text-muted-foreground">
-            {[g.request_id && `req ${g.request_id}`, g.correlation_id && `corr ${g.correlation_id}`]
-              .filter(Boolean)
-              .join(' · ')}
+        {g.prompt ? (
+          <p className="line-clamp-2 text-sm leading-relaxed">{g.prompt}</p>
+        ) : (
+          <p className="text-sm text-muted-foreground italic">No prompt</p>
+        )}
+        {inputs.length > 0 && (
+          <div className="flex items-center gap-1.5 overflow-hidden">
+            {inputs.slice(0, 5).map((a) => (
+              <div key={a.id} title={a.name} className="size-8 shrink-0 overflow-hidden rounded border">
+                <MediaThumb kind={a.kind} url={a.url} className="size-full" />
+              </div>
+            ))}
+            <span className="truncate text-xs text-muted-foreground">
+              {inputs.length} input{inputs.length > 1 ? 's' : ''}
+            </span>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-1">
+          {Object.entries(g.params).map(([k, v]) => (
+            <Badge key={k} variant="outline" className="font-normal text-muted-foreground">
+              {k === 'duration' ? `${v}s` : typeof v === 'boolean' ? (v ? k.replace('generate_', '') : `no ${k.replace('generate_', '')}`) : String(v)}
+            </Badge>
+          ))}
+        </div>
+        {out?.status === 'downloading' && (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Loader2 className="size-3 animate-spin" /> Saving a copy to this computer…
+          </p>
+        )}
+        {out?.status === 'download_failed' && (
+          <p className="text-xs text-amber-300">
+            {out.error} Playing from Higgsfield for now.{' '}
+            <button className="underline" onClick={() => act(async () => onUpdate({ ...g, output: await api.retryDownload(out.id) }))}>
+              Retry
+            </button>
           </p>
         )}
       </CardContent>
 
-      <CardFooter className="justify-end gap-1 pb-4">
+      <CardFooter className="flex-wrap justify-end gap-1 pb-4">
         {g.can_cancel && (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => act(() => api.cancel(g.id), 'Canceled')}>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => act(async () => onUpdate(await api.cancel(g.id)), 'Canceled')}>
             <X /> Cancel
           </Button>
         )}
         {refreshable && (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => act(() => api.refresh(g.id))}>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => act(async () => onUpdate(await api.refresh(g.id)))}>
             <RefreshCw className={cn(busy && 'animate-spin')} /> Check again
           </Button>
         )}
-        {g.video_url && (
-          <Button size="sm" variant="outline" asChild>
-            <a href={g.video_url} target="_blank" rel="noreferrer" download>
-              <Download /> Open
-            </a>
-          </Button>
+        {out && g.status === 'completed' && (
+          <>
+            <Button size="sm" variant="outline" onClick={() => studio({ mode: 'edit', source: out.id })}>
+              <Wand2 /> Edit
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => studio({ mode: 'extend', source: out.id })}>
+              <FastForward /> Extend
+            </Button>
+          </>
         )}
         {!g.is_active && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                disabled={busy}
-                aria-label="Remove from history"
-                onClick={() => act(async () => { await api.remove(g.id); onRemove(g.id) })}
-              >
-                <Trash2 />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Remove from history (does not affect Higgsfield)</TooltipContent>
-          </Tooltip>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon-sm" variant="ghost" aria-label="More actions" disabled={busy}><MoreHorizontal /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              {out && g.status === 'completed' && (
+                <>
+                  <DropdownMenuItem onClick={() => studio({ mode: 'reference', ref: out.id })}>
+                    <Images /> Use as reference
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => act(async () => {
+                    const a = await api.updateAsset(out.id, { in_library: !out.in_library })
+                    onUpdate({ ...g, output: a })
+                  }, out.in_library ? 'Removed from references' : 'Added to references')}>
+                    {out.in_library ? <><BookmarkCheck /> Remove from references</> : <><BookmarkPlus /> Add to references</>}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <a href={`${out.url}?download=1`} download><Download /> Download</a>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              <DropdownMenuItem variant="destructive" onClick={() => act(async () => {
+                await api.removeGeneration(g.id)
+                onRemove(g.id)
+              }, 'Removed')}>
+                <Trash2 /> Remove from project
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </CardFooter>
+      {(g.request_id || g.correlation_id) && (
+        <p className="truncate border-t px-4 py-2 font-mono text-[10px] text-muted-foreground/70">
+          {[g.request_id && `req ${g.request_id}`, g.correlation_id && `corr ${g.correlation_id}`].filter(Boolean).join(' · ')}
+        </p>
+      )}
     </Card>
   )
 }

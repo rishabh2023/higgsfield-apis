@@ -34,21 +34,22 @@ Goal: get the app running and give them a link to open. Keep your messages short
 3. **Verify.** Run `curl -s http://localhost:5173/api/health`. It must return `{"ok":true}`.
    A `200` from `http://localhost:5173/` means the UI is being served.
 4. **Hand off.** Tell the user:
-   > It's running. Open http://localhost:5173, paste your Higgsfield **Key ID** and **Secret**
-   > (from https://console.higgsfield.ai) into the API key box, click *Verify & save*, then generate.
+   > It's running. Open http://localhost:5173, go to **Settings**, paste your Higgsfield **Key ID** and **Secret**
+   > (from https://console.higgsfield.ai), click *Verify & save*, then create a project and generate.
 
 ## Rules
 
 - **Never ask the user to paste their API key or secret into the chat.** They enter it only in the web
   UI, which stores it encrypted server-side. No env var is needed for the key.
 - Don't generate test videos on the user's behalf. Each generation costs their credits.
-- Don't commit `backend/data/` (it holds the encrypted DB and `secret.key`), `.env`, `.venv`, or `node_modules`.
+- Don't commit `backend/data/` (the encrypted DB, `secret.key`, and `media/` with the user's videos), `.env`, `.venv`, or `node_modules`.
+- Model definitions live in `backend/app/catalog.py` (the only place to add or change a model; the UI form is generated from it).
 - If a port is busy, `start.sh` picks the next free one automatically. Report the URL it prints.
 
 ## Checks (for code changes)
 
 ```bash
-cd backend && uv run --python 3.12 pytest -q    # 29 mocked tests, no network needed
+cd backend && uv run --python 3.12 pytest -q    # mocked tests, no network needed
 ```
 
 ```bash

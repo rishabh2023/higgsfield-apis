@@ -1,16 +1,19 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 
-from app import db, service
+from app import catalog, db, media, projects, service
 from app.config import get_settings
 from app.identity import current_workspace, require_app_header
 from app.poller import Poller
-from app.schemas import SEEDANCE_2_T2V, CreateGeneration, CredentialStatus, Generation, SaveApiKey
+from app.schemas import AssetPatch, CreateGeneration, CredentialStatus, ProjectIn, ProjectPatch, SaveApiKey
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 # httpx logs full request lines at INFO; keep it quiet (URLs carry no secrets, but be conservative).
@@ -47,25 +50,10 @@ def health() -> dict:
 
 # ------------------------------------------------------------------ models
 
-MODELS = [
-    {
-        "id": SEEDANCE_2_T2V,
-        "name": "Seedance 2.0 — Text to video",
-        "provider": "ByteDance via Higgsfield",
-        "docs": "https://docs.higgsfield.ai/docs/models/seedance-2/text-to-video",
-        "params": {
-            "duration": {"min": 4, "max": 15, "default": 5},
-            "resolution": {"options": ["480p", "720p", "1080p", "4k"], "default": "720p"},
-            "aspect_ratio": {"options": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"], "default": "16:9"},
-            "generate_audio": {"default": True},
-        },
-    }
-]
-
 
 @app.get("/api/models")
-def list_models() -> list[dict]:
-    return MODELS
+def list_models() -> dict:
+    return catalog.catalog()
 
 
 # ------------------------------------------------------------------ settings
@@ -92,39 +80,118 @@ def delete_api_key(workspace_id: str = Depends(current_workspace)):
     return Response(status_code=204)
 
 
+# ------------------------------------------------------------------ projects
+
+
+@app.get("/api/projects")
+def list_projects(workspace_id: str = Depends(current_workspace)):
+    return projects.list_all(workspace_id)
+
+
+@app.post("/api/projects", status_code=201, dependencies=[Mutation])
+def create_project(body: ProjectIn, workspace_id: str = Depends(current_workspace)):
+    return projects.public(workspace_id, projects.create(workspace_id, body.name, body.description)["id"])
+
+
+@app.get("/api/projects/{project_id}")
+def get_project(project_id: str, workspace_id: str = Depends(current_workspace)):
+    return projects.public(workspace_id, project_id)
+
+
+@app.patch("/api/projects/{project_id}", dependencies=[Mutation])
+def update_project(project_id: str, body: ProjectPatch, workspace_id: str = Depends(current_workspace)):
+    return projects.update(workspace_id, project_id, body.name, body.description)
+
+
+@app.delete("/api/projects/{project_id}", status_code=204, dependencies=[Mutation])
+def delete_project(project_id: str, workspace_id: str = Depends(current_workspace)):
+    projects.delete(workspace_id, project_id)
+    return Response(status_code=204)
+
+
+# ------------------------------------------------------------------ assets (reference library + outputs)
+
+
+@app.get("/api/projects/{project_id}/assets")
+def list_assets(project_id: str, scope: Literal["library", "all"] = "all", workspace_id: str = Depends(current_workspace)):
+    projects.get_owned(workspace_id, project_id)
+    return [media.to_public(a) for a in media.list_for_project(workspace_id, project_id, scope == "library")]
+
+
+@app.post("/api/projects/{project_id}/assets", status_code=201, dependencies=[Mutation])
+async def upload_asset(project_id: str, file: UploadFile, workspace_id: str = Depends(current_workspace)):
+    projects.get_owned(workspace_id, project_id)
+    a = await run_in_threadpool(media.save_upload, workspace_id, project_id, file.filename or "", file.file, file.size)
+    return media.to_public(a)
+
+
+@app.patch("/api/assets/{asset_id}", dependencies=[Mutation])
+def update_asset(asset_id: str, body: AssetPatch, workspace_id: str = Depends(current_workspace)):
+    return media.to_public(media.update(workspace_id, asset_id, name=body.name, in_library=body.in_library))
+
+
+@app.delete("/api/assets/{asset_id}", status_code=204, dependencies=[Mutation])
+def delete_asset(asset_id: str, workspace_id: str = Depends(current_workspace)):
+    media.delete(workspace_id, asset_id)
+    return Response(status_code=204)
+
+
+@app.post("/api/assets/{asset_id}/retry-download", dependencies=[Mutation])
+async def retry_asset_download(asset_id: str, workspace_id: str = Depends(current_workspace)):
+    return media.to_public(await media.retry_download(workspace_id, asset_id))
+
+
+@app.get("/api/assets/{asset_id}/file")
+def asset_file(asset_id: str, download: bool = False, workspace_id: str = Depends(current_workspace)):
+    a = media.get_owned(workspace_id, asset_id)
+    if a["local_path"] and Path(a["local_path"]).exists():
+        filename = a["name"] if Path(a["name"]).suffix else a["name"] + (media.EXT.get(a["content_type"]) or "")
+        return FileResponse(
+            a["local_path"], media_type=a["content_type"],
+            filename=filename if download else None,
+            content_disposition_type="attachment" if download else "inline",
+        )
+    if a["remote_url"]:
+        # Local copy still downloading (or failed): fall back to Higgsfield's CDN copy.
+        return RedirectResponse(a["remote_url"], status_code=307)
+    raise HTTPException(404, "File not available")
+
+
 # ------------------------------------------------------------------ generations
 
 
-@app.get("/api/generations", response_model=list[Generation])
-def list_generations(workspace_id: str = Depends(current_workspace)):
-    return [service.to_schema(r) for r in service.list_generations(workspace_id)]
+@app.get("/api/projects/{project_id}/generations")
+def list_generations(project_id: str, workspace_id: str = Depends(current_workspace)):
+    projects.get_owned(workspace_id, project_id)
+    return [service.to_public(r) for r in service.list_generations(workspace_id, project_id)]
 
 
-@app.post("/api/generations", response_model=Generation, dependencies=[Mutation])
+@app.post("/api/projects/{project_id}/generations", dependencies=[Mutation])
 async def create_generation(
+    project_id: str,
     body: CreateGeneration,
     response: Response,
     idempotency_key: str = Header(alias="Idempotency-Key"),
     workspace_id: str = Depends(current_workspace),
 ):
-    row, created = await service.create_generation(workspace_id, body, idempotency_key)
+    row, created = await service.create_generation(workspace_id, project_id, body, idempotency_key)
     response.status_code = 201 if created else 200
-    return service.to_schema(row)
+    return service.to_public(row)
 
 
-@app.get("/api/generations/{generation_id}", response_model=Generation)
+@app.get("/api/generations/{generation_id}")
 def get_generation(generation_id: str, workspace_id: str = Depends(current_workspace)):
-    return service.to_schema(service.get_owned(workspace_id, generation_id))
+    return service.to_public(service.get_owned(workspace_id, generation_id))
 
 
-@app.post("/api/generations/{generation_id}/cancel", response_model=Generation, dependencies=[Mutation])
+@app.post("/api/generations/{generation_id}/cancel", dependencies=[Mutation])
 async def cancel_generation(generation_id: str, workspace_id: str = Depends(current_workspace)):
-    return service.to_schema(await service.cancel_generation(workspace_id, generation_id))
+    return service.to_public(await service.cancel_generation(workspace_id, generation_id))
 
 
-@app.post("/api/generations/{generation_id}/refresh", response_model=Generation, dependencies=[Mutation])
+@app.post("/api/generations/{generation_id}/refresh", dependencies=[Mutation])
 async def refresh_generation(generation_id: str, workspace_id: str = Depends(current_workspace)):
-    return service.to_schema(await service.refresh_generation(workspace_id, generation_id))
+    return service.to_public(await service.refresh_generation(workspace_id, generation_id))
 
 
 @app.delete("/api/generations/{generation_id}", status_code=204, dependencies=[Mutation])
